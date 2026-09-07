@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.8
+// @version      0.2.9
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.9 = R 键去除详情页屏蔽：程序化点击站内 a[data-click-unfilter]（同 F 走原生思路）；
+ *              仅在"解除链接在且大图未载入"时接管，并阻断站方 r=随机图；含菜单「🎚 R键去屏蔽开关」：
  * 里程碑备注（0.2.8 = 键盘早挂修复（数据确诊）：F/E 被站方快捷键处理器先注册吞掉（D 未绑所以通）；
  *              keydown 前移到 document-start + window 捕获期，先于站方脚本绑定，F/E/D 从根上赢回）：
  * 里程碑备注（0.2.7 = E 键无反应自查探针：加载日志带版本号（一眼区分"旧版未装到位"）+
@@ -63,6 +65,7 @@
     hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
     navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
     pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
+    unfilterHotkey:    'r',         // 0.2.9 详情页去屏蔽键（仅在确有屏蔽且开关开时接管；平时保留站方 r=随机）
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -113,7 +116,8 @@
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
-    if (!isF && !isD && !isE) return;
+    const isR = key === CONFIG.unfilterHotkey;
+    if (!isF && !isD && !isE && !isR) return;
     if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
@@ -121,7 +125,12 @@
       if (c) setTargetFromEl(c);
     }
     J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
-    if (isE) {
+    if (isR) {
+      // 详情页确有屏蔽且开关开时接管去屏蔽，并阻断站方 r=随机图；否则放行
+      if (kind === 'detail' && unfilterOn() && unfilterDetail()) e.stopImmediatePropagation();
+      else if (kind === 'detail') J('R 放行（开关关或大图已在显示，不接管站方随机）');
+      else J('R 仅作用于详情页');
+    } else if (isE) {
       if (kind === 'grid') gotoRelPage(+1);
       else J('E 仅作用于搜索/网格页');
     } else if (isF) {
@@ -555,6 +564,27 @@
     location.assign(a.getAttribute('href'));
   }
 
+  /* 0.2.9 R 键：详情页去除屏蔽（等同站内 "click here to display it anyway"）。
+   * 仅在确有屏蔽（解除链接在且大图未载入）时接管；此时阻断站方 r=随机图快捷键。 */
+  function unfilterOn() {
+    return typeof GM_getValue === 'function' ? !!GM_getValue('unfilterOn', true) : true;
+  }
+  function toggleUnfilter() {
+    const next = !unfilterOn();
+    if (typeof GM_setValue === 'function') GM_setValue('unfilterOn', next);
+    toast('R键去屏蔽：' + (next ? '开' : '关'));
+  }
+  function unfilterDetail() {
+    const link = document.querySelector('a[data-click-unfilter]');
+    const pic = document.querySelector('.image-show picture, .image-target picture');
+    if (!link) return false;
+    if (pic && pic.querySelector('img')) return false;      // 大图已在显示，无需解除
+    J('R 去屏蔽 #' + (link.getAttribute('data-click-unfilter') || ''));
+    link.click();                                            // 交由站方原生处理器完成
+    toast('已解除屏蔽，正在显示大图');
+    return true;
+  }
+
   async function runHotkey(ctx, withBack) {
     if (state.busy || !ctx.id) {
       if (state.busy) J('F 流程被 busy 挡下（若同刻另一路已发车，属正常防重）');
@@ -614,6 +644,7 @@
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
       `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
       `按钮实例数（>1 = 装了两份脚本，务必删旧条目）: ${document.querySelectorAll('#dts-btn').length}`,
+      `R键去屏蔽开关: ${unfilterOn() ? '开' : '关'}（键=${CONFIG.unfilterHotkey}）`,
       `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
@@ -680,6 +711,7 @@
       GM_registerMenuCommand('📋 活动日志', showJournal);
       GM_registerMenuCommand('🧹 清空活动日志', clearJournal);
       GM_registerMenuCommand('📋 复制活动日志', copyJournal);
+      GM_registerMenuCommand('🎚 R键去屏蔽开关', toggleUnfilter);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
