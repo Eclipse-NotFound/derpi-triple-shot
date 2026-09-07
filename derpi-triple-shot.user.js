@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.4
+// @version      0.1.5
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,10 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.4 = 收藏与下载并行：下载不再等收藏回包（站内 fave 含服务端重索引，秒级耗时））：
+ * 里程碑备注（0.1.5 = 三种时序开关 + 分阶段时间戳；吸收 0.1.4 复盘教训）：
+ *  - 0.1.4 纯并行的代价：大图下载与收藏请求同时抢代理带宽，收藏回包反而变慢。
+ *  - 0.1.5 默认「错峰」：收藏先发、下载延后 staggerMs(300ms) 再走——两头都快；
+ *    可切 'parallel'/'serial' 对比；每阶段耗时打进控制台 [DTS·T]，速度问题用数据定案。
  *  - 403 病根确诊：站内收藏按钮 a.interaction--fave 是 href="#" 的假链接（JS 动态处理），
  *    0.1.1 拿它当提交地址打到了错误路由。修复：一律 POST /images/<id>/fave，
  *    暗号按站内惯例走表单参数 _csrf_token + X-CSRF-Token 头双保险。
@@ -38,6 +41,8 @@
     autoBack:          true,         // 详情页三连成功后自动回上一页（搜索页）
     autoBackDelayMs:   [1000, 3000], // 随机等待区间（毫秒）；想固定 1.5 秒写 [1500, 1500]
     buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
+    triShotTiming:     'stagger',   // 三连时序：'stagger' 错峰（推荐）| 'parallel' 并行 | 'serial' 串行
+    staggerMs:         300,         // 错峰模式下，下载比收藏晚发车的毫秒数（给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
   /* ===================== 配置区结束 ===================== */
@@ -181,19 +186,35 @@
 
   /* ---------------- 三连主流程 ---------------- */
 
+  /* 三连时序（0.1.5）：stagger=收藏先发、下载延迟跟进（默认，治 0.1.4 的带宽争抢）；
+   * parallel=同时发车；serial=等收藏回包再下载。每阶段耗时记入控制台 [DTS·T]。
+   * 两路各自记账（Q8 拍板：三动作独立执行独立记结果），任一失败都如实列出。 */
   async function triShot(ctx) {
     if (!ctx.id) throw new Error('找不到图片 ID');
-    // 并行发起：站内收藏接口含服务端重索引、回包慢（源码实证），不该拖住下载启动。
-    // 两路各自记账（Q8 拍板：三动作独立执行独立记结果），任一失败都如实列出。
-    const [faveRes, dlRes] = await Promise.allSettled([
-      postFave(ctx),      // 收藏（源码已证自带点赞，重复点无害）
-      downloadImage(ctx),
-    ]);
+    const t0 = performance.now();
+    const marks = { 点击: 0 };
+    const rec = (label) => { marks[label] = Math.round(performance.now() - t0); };
+    const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e }));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const faveP = settle((async () => { rec('收藏发出'); const r = await postFave(ctx); rec('收藏回包'); return r; })());
+    const dlP = settle((async () => {
+      const mode = CONFIG.triShotTiming;
+      if (mode === 'stagger') await wait(CONFIG.staggerMs);
+      else if (mode === 'serial') await faveP;
+      rec('下载发车');
+      const r = await downloadImage(ctx);
+      rec('下载完成');
+      return r;
+    })());
+
+    const [f, d] = await Promise.all([faveP, dlP]);
     const errs = [];
-    if (faveRes.status === 'rejected') errs.push('收藏/点赞：' + faveRes.reason.message);
-    if (dlRes.status === 'rejected') errs.push('下载：' + dlRes.reason.message);
+    if (!f.ok) errs.push('收藏/点赞：' + f.e.message);
+    if (!d.ok) errs.push('下载：' + d.e.message);
+    console.log('[DTS·T] 时序=' + CONFIG.triShotTiming + ' ' + JSON.stringify(marks) + (errs.length ? ' 失败：' + errs.join('；') : ''));
     if (errs.length) throw new Error(errs.join('；') + '｜另一路已完成');
-    return { inter: faveRes.value, dl: dlRes.value };
+    return { inter: f.v, dl: d.v };
   }
 
   /* ---------------- 自动回搜索页 ---------------- */
