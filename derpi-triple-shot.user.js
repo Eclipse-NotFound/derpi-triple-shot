@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.13
+// @version      0.2.14
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.14 = 反馈修复（数据确诊 v0.2.13 已装对）：①去屏蔽开关点击改弹窗反馈（原浮条太轻易漏）；
+ *              ②W"放行"路径加浮条说明（未屏蔽/开关关时按 W 有明确反馈，不再像坏了））：
  * 里程碑备注（0.2.13 = 收拢下载入口：Q 三连摘除（Q 也触发下载，与 F 重复，用户不满）→ 下载仅 F 触发；
  *              详情页右键 = D 键行为（返回上一页），右键回归纯导航）：
  * 里程碑备注（0.2.12 = W 无反应排查：匹配必留痕，零日志=未匹配→嫌疑旧版键位仍是 R。对策：加载日志烙
@@ -590,7 +592,8 @@
   function toggleUnfilter() {
     const next = !unfilterOn();
     if (typeof GM_setValue === 'function') GM_setValue('unfilterOn', next);
-    toast('R键去屏蔽：' + (next ? '开' : '关'));
+    J('去屏蔽键开关 → ' + (next ? '开' : '关'));
+    alert('去屏蔽键开关：' + (next ? '开' : '关'));   // 0.2.14：弹窗式反馈，绝不落空
   }
   function unfilterDetail() {
     const link = document.querySelector('a[data-click-unfilter]');
