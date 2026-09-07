@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.7
+// @version      0.1.8
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,8 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.7 = 新增 dispatch 模式并设为默认：收藏+下载请求发出即返回，不等任何回包）：
+ * 里程碑备注（0.1.8 = 返回前停顿缩到 300–600ms（原 1–3 秒是给等回包版本看数字用的，dispatch 下白等））：
+ *  0.1.7 dispatch 发出即走：收藏+下载请求发车即返回，不等任何回包；
  *  - 已知代价（用户拍板接受的）：返回会把页面冻进缓存，收藏结果无人回读——失败静默。
  *  - 对策：发出前预检登录态（页头有退出登录链接=已登录）；未登录直接拒发并红字提示。
  *  - 下载走 chrome.downloads（浏览器进程），页面冻结不影响传输，发出即安全。
@@ -36,7 +37,7 @@
   const CONFIG = {
     downloadSubfolder: 'derpi',      // 存到浏览器默认下载目录下的子文件夹；'' = 直接存下载根目录
     autoBack:          true,         // 详情页三连成功后自动回上一页（搜索页）
-    autoBackDelayMs:   [1000, 3000], // 随机等待区间（毫秒）；想固定 1.5 秒写 [1500, 1500]
+    autoBackDelayMs:   [300, 600],  // 返回前停顿（dispatch 模式回包不等，这段纯为让你瞄一眼提示）；真·秒回写 [0, 0]
     buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
     triShotTiming:     'dispatch',  // 三连时序：'dispatch' 发出即走（默认，激进）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
