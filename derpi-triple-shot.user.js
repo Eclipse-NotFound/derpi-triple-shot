@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.0
+// @version      0.1.1
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,10 +19,11 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.0 = M1 骨架）：
- *  - 核心链路按 philomena 源码事实编写；页面选择器（SEL）待 fixtures 验证后收口。
- *  - Tampermonkey 菜单里的「自检当前页面」是远程排障主工具：装上后先跑它。
- *  - 下载建议把 Tampermonkey 设置 → 下载模式 选 Browser（浏览器），子目录才生效。
+ * 里程碑备注（0.1.1 = M2 选择器第一轮收口）：
+ *  - 0.1.0 实测：详情页被误判为"其他页"（容器选择器未命中真实 DOM），按钮不出现。
+ *    修复：详情页判定以 URL 为准（/images/<id> 路径，query 任意），不再依赖容器选择器。
+ *  - 按钮与自检菜单全页常开：任何页都能跑「▶️ 自检当前页面」回报 DOM 事实。
+ *  - 下载建议把 Tampermonkey 设置 → 下载模式 选 浏览器 API（已设好），子目录才生效。
  */
 
 (function () {
@@ -46,7 +47,7 @@
     csrf:          ['meta[name="csrf-token"]', 'meta[name="csrf"]'],
     detailImage:   ['#image-container', 'div.image-container[data-image-id]'],
     imageIdAttr:   'data-image-id',
-    downloadLink:  ['a[href*="/img/download/"]', 'a[href*="/img/view/"]'],
+    downloadLink:  ['a[href*="/img/download/"]', 'a[href*="/img/view/"]', 'a[download]', 'a.download-link'],
     favePostLink:  ['a.interaction--fave[href$="/fave"][data-method="post"]', 'a.interaction--fave'],
     thumbImage:    'div.image-container[data-image-id]',
   };
@@ -66,7 +67,8 @@
   /* ---------------- 页面判定与信息提取 ---------------- */
 
   function pageKind() {
-    if (/\/images\/\d+/.test(location.pathname) && first(SEL.detailImage)) return 'detail';
+    // 详情页以 URL 为准：/images/<id> 路径是可靠信号，query 串任意（0.1.1 修复）
+    if (/\/images\/\d+/.test(location.pathname)) return 'detail';
     if (document.querySelector(SEL.thumbImage)) return 'grid';
     return 'other';
   }
@@ -76,14 +78,11 @@
     return m ? (m.getAttribute('content') || null) : null;
   }
 
-  /* 详情页上下文：ID、防伪暗号、页面自带的下载直链、站内收藏链接 */
+  /* 详情页上下文：ID 取自 URL（容器选择器只作补充）、防伪暗号、页面自带的下载/收藏链接 */
   function detailContext() {
+    const m = location.pathname.match(/\/images\/(\d+)/);
     const el = first(SEL.detailImage);
-    let id = el && el.getAttribute(SEL.imageIdAttr);
-    if (!id) {
-      const m = location.pathname.match(/\/images\/(\d+)/);
-      if (m) id = m[1];
-    }
+    const id = (m && m[1]) || (el && el.getAttribute(SEL.imageIdAttr));
     const dl = first(SEL.downloadLink);
     const fave = first(SEL.favePostLink);
     return {
@@ -349,29 +348,28 @@
 
   function runSelfTest() {
     const kind = pageKind();
-    const csrf = !!getCsrf();
-    const detail = first(SEL.detailImage);
-    const detailId = detail && detail.getAttribute(SEL.imageIdAttr);
-    const dlLink = !!first(SEL.downloadLink);
-    const faveLink = first(SEL.favePostLink);
+    const csrfEl = first(SEL.csrf);
+    const dlCounts = SEL.downloadLink
+      .map((s) => `${s}×${document.querySelectorAll(s).length}`)
+      .join('，');
+    const fave = first(SEL.favePostLink);
     const thumbs = document.querySelectorAll(SEL.thumbImage).length;
     const gms = {
       GM_download: typeof GM_download === 'function',
       GM_xmlhttpRequest: typeof GM_xmlhttpRequest === 'function',
     };
     const lines = [
-      `页面类型: ${kind}`,
-      `防伪暗号(CSRF): ${csrf ? '✓' : '✗ 找不到'}`,
-      `详情图容器: ${detail ? '✓ id=' + detailId : '—'}`,
-      `下载直链: ${dlLink ? '✓' : '—'}`,
-      `收藏链接: ${faveLink ? '✓ ' + faveLink.getAttribute('href') : '—'}`,
-      `网格缩略图数量: ${thumbs}`,
+      `页面类型: ${kind}（路径 ${location.pathname}）`,
+      `防伪暗号(CSRF): ${csrfEl ? '✓ <meta ' + csrfEl.getAttribute('name') + '>' : '✗ 未找到'}`,
+      `下载链接候选命中: ${dlCounts || '无'}`,
+      `收藏链接: ${fave ? '✓ ' + fave.getAttribute('href') + ' [' + (fave.getAttribute('data-method') || '') + ']' : '— 未找到'}`,
+      `网格缩略图容器: ${thumbs} 个`,
       `GM_download: ${gms.GM_download ? '✓' : '✗（开「允许用户脚本」）'}`,
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
+      `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
     ];
-    console.log('[DTS] 自检结果 ────────\n' + lines.join('\n'));
-    toast('自检完成，看 Tampermonkey 控制台/弹窗');
-    alert('[Derpi Triple Shot 自检]\n\n' + lines.join('\n'));
+    console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
+    alert('[Derpi Triple Shot 自检 0.1.1]\n\n' + lines.join('\n'));
   }
 
   /* ---------------- 样式 ---------------- */
@@ -409,15 +407,14 @@
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
       console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开（见 README 排障第 1 条）。');
     }
-    const kind = pageKind();
-    if (kind === 'other') { LOG('非图片/搜索页，按钮不出现'); return; }
+    // 按钮与菜单全页常开（0.1.1）：误判页也要能跑自检，点击时会解释本页不可用
     buildButton();
     setFace('idle');
     if (typeof GM_registerMenuCommand === 'function') {
       GM_registerMenuCommand('▶️ 自检当前页面', runSelfTest);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
-    LOG('就绪，页面类型：', kind);
+    LOG('就绪，页面类型：', pageKind());
   }
 
   main();
