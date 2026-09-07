@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.2
+// @version      0.2.3
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,6 +19,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.3 = 全手势活动日志（GM 存储环形 40 条，菜单「📋 活动日志」可读）+ 键盘改捕获期监听 +
+ *              网格 D 现场锁定兜底；目标：用数据揪出"详情页左键仍触发下载"与"网格 D 无反应"两症）：
  * 里程碑备注（0.2.2 = 左键返回竞态修复：返回前 backNow 先锁按钮+作废在途流程，30ms 后离场；
  *             pageshow 钩子清掉 BFCache 恢复页残留的锁定目标，杜绝返回瞬间合成点击"补刀"下载）：
  * 里程碑备注（0.2.1 = D 键导航环（网格→详情→返回）+ 自动返回延时菜单可调（存脚本存储，立即生效））：
@@ -54,6 +56,20 @@
   /* ===================== 配置区结束 ===================== */
 
   const LOG = (...a) => { if (CONFIG.debug) console.log('[DTS]', ...a); };
+
+  /* 0.2.3 活动日志：环形 40 条、每条落 GM 存储（跨页面保留）；菜单「📋 活动日志」读出 */
+  const journal = [];
+  function J(msg) {
+    const line = new Date().toTimeString().slice(0, 8) + ' ' + msg;
+    journal.push(line);
+    if (journal.length > 40) journal.shift();
+    if (typeof GM_setValue === 'function') GM_setValue('journal', journal.join('\n'));
+    if (CONFIG.debug) console.log('[DTS·J]', msg);
+  }
+  function showJournal() {
+    const data = (typeof GM_getValue === 'function') ? GM_getValue('journal', '') : '';
+    alert('[活动日志（最近 40 条，倒序在后）]\n\n' + (data || '（空——请先复现一次问题）'));
+  }
 
   /* 选择器——2026-09-07 已按真实页面 fixtures 收口（实测✓） */
   const SEL = {
@@ -183,8 +199,9 @@
     if (typeof GM_download !== 'function') throw new Error('GM_download 不可用——检查「允许用户脚本」开关');
     const { url, name } = await resolveDownload(ctx);
     const target = (CONFIG.downloadSubfolder ? CONFIG.downloadSubfolder + '/' : '') + name;
+    J('下载发车 #' + ctx.id + ' → ' + target.slice(0, 40));
     gmDownload(url, target).catch((e) => {
-      LOG('子目录下载失败，退化平铺：', e.message);
+      J('子目录下载失败，退化平铺：' + e.message);
       gmDownload(url, 'derpi_' + name).catch(() => {});
     });
     return { name: target };
@@ -304,12 +321,13 @@
       }
     });
     btn.addEventListener('pointerup', (e) => {
-      if (down && dragged) GM_setValue('btnPos', { x: btn.offsetLeft, y: btn.offsetTop });
-      else if (down && e.button === 0) onLeftClick();   // 右键走 contextmenu，不在这里触发
+      if (down && dragged) { GM_setValue('btnPos', { x: btn.offsetLeft, y: btn.offsetTop }); J('按钮拖动并松手'); }
+      else if (down && e.button === 0) { J('按钮左键点起'); onLeftClick(); }   // 右键走 contextmenu，不在这里触发
       down = null;
     });
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
+      J('按钮右键（→三连）');
       if (pageKind() === 'detail') onClickButton();        // 详情页右键 = 三连（0.1.9 手势）
     });
   }
@@ -325,6 +343,7 @@
    * 病灶：返回瞬间详情页冻结进缓存，半路的下载流程回调在解冻边界继续执行，
    * 造成“左键返回顺带触发下载”。 */
   function backNow(quiet) {
+    J('backNow（quiet=' + quiet + '）');
     const ref = document.referrer || '';
     if (!ref.includes(location.hostname)) {
       if (!quiet) toast('本页没有站内来路，不返回（新标签可手动关）');
@@ -335,6 +354,7 @@
     clearTimeout(resetTimer);
     if (btn) setFace('busy');
     setTimeout(() => {
+      J('backNow 30ms 后离场');
       if (history.length > 1) history.back();
       else window.close();
     }, 30);
@@ -351,12 +371,14 @@
     const [a, b] = (typeof fixed === 'number' && Number.isFinite(fixed)) ? [fixed, fixed] : CONFIG.autoBackDelayMs;
     const delay = Math.round(a + Math.random() * Math.max(0, b - a));
     const token = state.token;
+    J('排定自动返回 ' + delay + 'ms（token=' + token + '）');
     setTimeout(() => { if (token === state.token) backNow(true); }, delay);
   }
 
   async function onClickButton() {
     if (state.busy) return;
     const kind = pageKind();
+    J('按钮三连 kind=' + kind + ' target=' + (state.targetId || '∅'));
     let ctx;
     if (kind === 'detail') {
       ctx = detailContext();
@@ -409,21 +431,25 @@
 
   /* ---------------- 网格页目标记忆 ---------------- */
 
-  document.addEventListener('mouseover', (e) => {
-    if (pageKind() !== 'grid' || !e.target || !e.target.closest) return;
-    const c = e.target.closest('div.image-container[data-image-id]');
+  function setTargetFromEl(c) {
     if (!c || c === state.targetEl) return;
     if (state.targetEl) state.targetEl.classList.remove('dts-target');
     state.targetEl = c;
     state.targetId = c.getAttribute(SEL.imageIdAttr);
     c.classList.add('dts-target');
     if (face) face.textContent = '⚡';
-    LOG('目标锁定 #' + state.targetId);
+    J('锁定目标 #' + state.targetId);
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    if (pageKind() !== 'grid' || !e.target || !e.target.closest) return;
+    setTargetFromEl(e.target.closest('div.image-container[data-image-id]'));
   });
 
   /* 0.2.2 BFCache 恢复清理：返回进缓存的页面再解冻时，清掉冻结前残留的锁定目标与忙态——
    * 否则返回瞬间浏览器合成的第二次点击会落在旧目标上，造成"左键返回顺带下载"。 */
   window.addEventListener('pageshow', (e) => {
+    J('pageshow persisted=' + e.persisted);
     if (!e.persisted) return;                 // 只处理从缓存恢复（back/forward 解冻），首次加载不清理
     state.targetEl = null;
     state.targetId = null;
@@ -453,14 +479,22 @@
     if (!isF && !isD) return;
     if (isTextTarget(e.target)) return;                        // 搜索框/标签编辑器里打字永不触发
     const kind = pageKind();
+    if (kind === 'grid' && !state.targetId) {
+      // 悬停追踪万一滞后：按键事件目标本身在缩略图上则现场锁定（0.2.3 兜底）
+      const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
+      if (c) setTargetFromEl(c);
+    }
+    J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
     if (isF) {
       if (kind === 'detail') runHotkey(detailContext(), true);   // 详情页：补下载 + 自动返回
       else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false); // 网格：补下载（收藏交给站方自己的 F）
+      else J('F 无目标，只余站方原生收藏');
     } else {
       if (kind === 'detail') goBackNow();                        // 详情页 D：直接返回上一页
       else if (kind === 'grid' && state.targetId) openTarget();  // 网格 D：当前标签页进入悬停图的详情页
+      else J('D 未命中（非详情页或无目标）');
     }
-  });
+  }, true);  // 捕获期：先于站方快捷键处理器，杜绝被抢听/停传播吞掉
 
   /* 网格 D：优先用缩略图自己的链接（保留 ?q= 浏览上下文），退化纯 ID */
   function openTarget() {
@@ -475,6 +509,7 @@
       toast('未登录——站内原生 F 收藏不会生效，下载已跳过');
       return;
     }
+    J('F 流程开始 #' + ctx.id + ' withBack=' + withBack);
     state.busy = true;
     setFace('busy');
     try {
@@ -486,6 +521,7 @@
       if (typeof GM_setValue === 'function') GM_setValue('lastTiming', line);
       if (withBack) scheduleAutoBack();
     } catch (e) {
+      J('F 流程失败：' + e.message);
       setFace('fail');
       toast('快捷键三连失败：' + e.message);
       LOG('hotkey:', e);
@@ -585,6 +621,7 @@
     if (typeof GM_registerMenuCommand === 'function') {
       GM_registerMenuCommand('▶️ 自检当前页面', runSelfTest);
       GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
+      GM_registerMenuCommand('📋 活动日志', showJournal);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
