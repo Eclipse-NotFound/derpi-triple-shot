@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.1
+// @version      0.2.2
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,6 +19,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.2 = 左键返回竞态修复：返回前 backNow 先锁按钮+作废在途流程，30ms 后离场；
+ *             pageshow 钩子清掉 BFCache 恢复页残留的锁定目标，杜绝返回瞬间合成点击"补刀"下载）：
  * 里程碑备注（0.2.1 = D 键导航环（网格→详情→返回）+ 自动返回延时菜单可调（存脚本存储，立即生效））：
  *  0.2.0 键盘三连：F 键纯搭载——收藏+点赞走站内原生处理器（星星实时点亮），
  *              插件对同一次按键只补发下载（详情页再加自动返回）；网格/详情通用，⚡ 按钮退役为鼠标备用。
@@ -74,6 +76,7 @@
     targetEl: null,   // 网格页当前目标缩略图元素
     targetId: null,   // 其图片 ID
     busy: false,
+    token: 0,         // 0.2.2 竞态护栏：每次「先停手再返回」+1，在途流程回写状态前核对，作废即弃
   };
 
   /* ---------------- 页面判定与信息提取 ---------------- */
@@ -253,27 +256,7 @@
     return { inter: f.v, dl: d.v };
   }
 
-  /* ---------------- 自动回搜索页 ---------------- */
-
-  function scheduleAutoBack() {
-    if (!CONFIG.autoBack) return;
-    try {
-      const ref = document.referrer || '';
-      const sameSite = ref.includes(location.hostname); // 来路必须是站内页（搜索页），外来客不送
-      if (!sameSite) { toast('已完成（无站内来路，不自动返回）'); return; }
-      // 0.2.1：菜单设置的固定延时优先（存脚本存储，跨更新保留）；未设置则用配置区默认区间随机
-      const fixed = (typeof GM_getValue === 'function') ? GM_getValue('backDelayMs', null) : null;
-      const [a, b] = (typeof fixed === 'number' && Number.isFinite(fixed)) ? [fixed, fixed] : CONFIG.autoBackDelayMs;
-      const delay = Math.round(a + Math.random() * Math.max(0, b - a));
-      setTimeout(() => {
-        if (history.length > 1) {
-          history.back();                    // 同标签打开 → 回搜索页
-        } else {
-          window.close();                    // 新标签打开 → 尽力关闭（浏览器只放行脚本开的标签）
-        }
-      }, delay);
-    } catch (e) { LOG('自动返回失败：', e); }
-  }
+  /* 自动返回统一入口在浮动按钮区（backNow/scheduleAutoBack，0.2.2 带竞态护栏），此处旧版已除 */
 
   /* ---------------- 浮动按钮 UI ---------------- */
 
@@ -338,11 +321,37 @@
     onClickButton();
   }
 
-  function goBackNow() {
+  /* 0.2.2 竞态修复：返回前先停手——作废一切在途流程、按钮上锁，30ms 后再走。
+   * 病灶：返回瞬间详情页冻结进缓存，半路的下载流程回调在解冻边界继续执行，
+   * 造成“左键返回顺带触发下载”。 */
+  function backNow(quiet) {
     const ref = document.referrer || '';
-    if (!ref.includes(location.hostname)) { toast('本页没有站内来路，不返回（新标签可手动关）'); return; }
-    if (history.length > 1) history.back();
-    else window.close();
+    if (!ref.includes(location.hostname)) {
+      if (!quiet) toast('本页没有站内来路，不返回（新标签可手动关）');
+      return;
+    }
+    state.token++;                          // 作废所有在途流程的迟到回写
+    state.busy = true;                      // 冻结期内新点击全部拒绝
+    clearTimeout(resetTimer);
+    if (btn) setFace('busy');
+    setTimeout(() => {
+      if (history.length > 1) history.back();
+      else window.close();
+    }, 30);
+  }
+
+  function goBackNow() { backNow(false); }
+
+  function scheduleAutoBack() {
+    if (!CONFIG.autoBack) return;
+    const ref = document.referrer || '';
+    if (!ref.includes(location.hostname)) { toast('已完成（无站内来路，不自动返回）'); return; }
+    // 0.2.1：菜单设置的固定延时优先（存脚本存储，跨更新保留）；未设置则用配置区默认区间随机
+    const fixed = (typeof GM_getValue === 'function') ? GM_getValue('backDelayMs', null) : null;
+    const [a, b] = (typeof fixed === 'number' && Number.isFinite(fixed)) ? [fixed, fixed] : CONFIG.autoBackDelayMs;
+    const delay = Math.round(a + Math.random() * Math.max(0, b - a));
+    const token = state.token;
+    setTimeout(() => { if (token === state.token) backNow(true); }, delay);
   }
 
   async function onClickButton() {
@@ -410,6 +419,18 @@
     c.classList.add('dts-target');
     if (face) face.textContent = '⚡';
     LOG('目标锁定 #' + state.targetId);
+  });
+
+  /* 0.2.2 BFCache 恢复清理：返回进缓存的页面再解冻时，清掉冻结前残留的锁定目标与忙态——
+   * 否则返回瞬间浏览器合成的第二次点击会落在旧目标上，造成"左键返回顺带下载"。 */
+  window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;                 // 只处理从缓存恢复（back/forward 解冻），首次加载不清理
+    state.targetEl = null;
+    state.targetId = null;
+    state.busy = false;
+    state.token++;
+    if (btn) setFace('idle');
+    LOG('BFCache 恢复，已清理残留目标/忙态');
   });
 
   /* ---------------- 0.2.0 键盘三连：F=站内原生收藏/点赞，本插件对同一按键补发下载（详情页附返回） ---------------- */
