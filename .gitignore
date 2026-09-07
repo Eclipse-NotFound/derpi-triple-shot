@@ -1,0 +1,6 @@
+# 真实页面样本可能含用户名等登录态信息，不入库（fixtures/README.md 说明）
+fixtures/*.html
+
+node_modules/
+*.log
+.DS_Store
