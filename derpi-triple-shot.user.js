@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.2
+// @version      0.1.3
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,7 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.2 = 真实页面 fixtures 收口，2026-09-07）：
+ * 里程碑备注（0.1.3 = 成功提示显示服务器回传的收藏数/得分，排查“未收藏”疑云）：
  *  - 403 病根确诊：站内收藏按钮 a.interaction--fave 是 href="#" 的假链接（JS 动态处理），
  *    0.1.1 拿它当提交地址打到了错误路由。修复：一律 POST /images/<id>/fave，
  *    暗号按站内惯例走表单参数 _csrf_token + X-CSRF-Token 头双保险。
@@ -278,10 +278,11 @@
     setFace('busy');
     state.busy = true;
     try {
-      await triShot(ctx);
+      const res = await triShot(ctx);
       setFace('ok');
-      toast(`三连成功 #${ctx.id} ✓`);
-      LOG('成功：', ctx.id);
+      const i = res.inter || {};
+      toast(`三连成功 #${ctx.id} ✓（服务器回包：收藏 ${i.faves ?? '?'}，得分 ${i.score ?? '?'}）`);
+      LOG('成功：', ctx.id, res.inter, res.dl.name);
       if (kind === 'detail') scheduleAutoBack();
     } catch (e) {
       setFace('fail');
