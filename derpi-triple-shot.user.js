@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.14
+// @version      0.2.15
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.15 = ①恢复详情页右键=三连（用户要求；网格右键仍无动作）；②W 去屏蔽整套暂时摘除
+ *              （用户拍板：仍不工作，待后续开发；git 历史 0.2.9–0.2.14 保留完整实现与开关））：
  * 里程碑备注（0.2.14 = 反馈修复（数据确诊 v0.2.13 已装对）：①去屏蔽开关点击改弹窗反馈（原浮条太轻易漏）；
  *              ②W"放行"路径加浮条说明（未屏蔽/开关关时按 W 有明确反馈，不再像坏了））：
  * 里程碑备注（0.2.13 = 收拢下载入口：Q 三连摘除（Q 也触发下载，与 F 重复，用户不满）→ 下载仅 F 触发；
@@ -76,7 +78,6 @@
     hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
     navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
     pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
-    unfilterHotkey:    'w',         // 0.2.10 详情页去屏蔽键（原 R 撞站方 r=随机，改 W；确有屏蔽且开关开时接管）
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -127,11 +128,10 @@
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
-    const isR = key === CONFIG.unfilterHotkey;
-    if (!isF && !isD && !isE && !isR) {
+    if (!isF && !isD && !isE) {
       // 0.2.12：未匹配的单字母按键留痕（定位"某键无反应"是没装对/键位不符/事件未达）；输入区内不打
       if (key.length === 1 && !isTextTarget(e.target)) {
-        J(`key ${key.toUpperCase()} 未匹配（键位 F/D/E/去屏蔽=${CONFIG.unfilterHotkey}）`);
+        J(`key ${key.toUpperCase()} 未匹配（键位 F/D/E）`);
       }
       return;
     }
@@ -142,16 +142,7 @@
       if (c) setTargetFromEl(c);
     }
     J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
-    if (isR) {
-      // 详情页确有屏蔽且开关开时接管去屏蔽，并阻断站方 r=随机图；否则放行
-      const UK = CONFIG.unfilterHotkey.toUpperCase();
-      if (kind === 'detail' && unfilterOn() && unfilterDetail()) e.stopImmediatePropagation();
-      else if (kind === 'detail') {
-        J(UK + ' 放行（开关关或大图已在显示，不接管站方随机）');
-        toast(unfilterOn() ? '本图已在显示，无需解除屏蔽' : '去屏蔽开关已关（菜单「🎚 去屏蔽键开关」可开）');
-      }
-      else J(UK + ' 仅作用于详情页');
-    } else if (isE) {
+    if (isE) {
       if (kind === 'grid') gotoRelPage(+1);
       else J('E 仅作用于搜索/网格页');
     } else if (isF) {
@@ -383,7 +374,7 @@
     face.className = 'dts-face';
     face.textContent = '⚡';
     btn.appendChild(face);
-    btn.title = '左键/右键：详情=返回（右键同 D 键）；网格左键=三连锁定图；可拖动；三连主走 F 键';
+    btn.title = '详情：左键=返回 · 右键=三连；网格：左键=三连锁定图；可拖动；三连也可走 F 键';
     document.body.appendChild(btn);
     restorePos();
     attachDragAndClick();
@@ -425,8 +416,8 @@
     });
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
-      // 0.2.13：详情页右键 = D 键行为（返回上一页）；其余页面无动作
-      if (pageKind() === 'detail') { J('按钮右键（=D 键：返回）'); goBackNow(); }
+      // 0.2.15（用户要求）：详情页右键 = 三连；网格右键仍无动作
+      if (pageKind() === 'detail') { J('按钮右键（→三连）'); onClickButton(); }
       else J('按钮右键（非详情页无动作）');
     });
   }
@@ -587,27 +578,7 @@
     location.assign(a.getAttribute('href'));
   }
 
-  /* 0.2.9 R 键：详情页去除屏蔽（等同站内 "click here to display it anyway"）。
-   * 仅在确有屏蔽（解除链接在且大图未载入）时接管；此时阻断站方 r=随机图快捷键。 */
-  function unfilterOn() {
-    return typeof GM_getValue === 'function' ? !!GM_getValue('unfilterOn', true) : true;
-  }
-  function toggleUnfilter() {
-    const next = !unfilterOn();
-    if (typeof GM_setValue === 'function') GM_setValue('unfilterOn', next);
-    J('去屏蔽键开关 → ' + (next ? '开' : '关'));
-    alert('去屏蔽键开关：' + (next ? '开' : '关'));   // 0.2.14：弹窗式反馈，绝不落空
-  }
-  function unfilterDetail() {
-    const link = document.querySelector('a[data-click-unfilter]');
-    const pic = document.querySelector('.image-show picture, .image-target picture');
-    if (!link) return false;
-    if (pic && pic.querySelector('img')) return false;      // 大图已在显示，无需解除
-    J(CONFIG.unfilterHotkey.toUpperCase() + ' 去屏蔽 #' + (link.getAttribute('data-click-unfilter') || ''));
-    link.click();                                            // 交由站方原生处理器完成
-    toast('已解除屏蔽，正在显示大图');
-    return true;
-  }
+  /* 去屏蔽（W 键）已按用户要求暂时摘除（0.2.15，待后续开发）；完整实现见 git 历史 0.2.9–0.2.14 */
 
   async function runHotkey(ctx, withBack) {
     if (state.busy || !ctx.id) {
@@ -668,7 +639,6 @@
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
       `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
       `按钮实例数（>1 = 装了两份脚本，务必删旧条目）: ${document.querySelectorAll('#dts-btn').length}`,
-      `去屏蔽键开关: ${unfilterOn() ? '开' : '关'}（键=${CONFIG.unfilterHotkey}）`,
       `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
@@ -724,7 +694,6 @@
   function main() {
     J('脚本加载 v' + scriptVer() +
       ' 键位 F=' + CONFIG.hotkey + ' D=' + CONFIG.navHotkey + ' E=' + CONFIG.pageHotkey +
-      ' 去屏蔽=' + CONFIG.unfilterHotkey +
       ' kind=' + pageKind());
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
       console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开（见 README 排障第 1 条）。');
@@ -738,7 +707,6 @@
       GM_registerMenuCommand('📋 活动日志', showJournal);
       GM_registerMenuCommand('🧹 清空活动日志', clearJournal);
       GM_registerMenuCommand('📋 复制活动日志', copyJournal);
-      GM_registerMenuCommand('🎚 去屏蔽键开关', toggleUnfilter);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
