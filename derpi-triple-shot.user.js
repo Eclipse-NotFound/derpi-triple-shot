@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.15
+// @version      0.2.16
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,7 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.16 = 手势重排（用户拍板 B）：左键=三连（详情/网格统一）；详情页右键=返回、网格右键无动作）：
  * 里程碑备注（0.2.15 = ①恢复详情页右键=三连（用户要求；网格右键仍无动作）；②W 去屏蔽整套暂时摘除
  *              （用户拍板：仍不工作，待后续开发；git 历史 0.2.9–0.2.14 保留完整实现与开关））：
  * 里程碑备注（0.2.14 = 反馈修复（数据确诊 v0.2.13 已装对）：①去屏蔽开关点击改弹窗反馈（原浮条太轻易漏）；
@@ -374,7 +375,7 @@
     face.className = 'dts-face';
     face.textContent = '⚡';
     btn.appendChild(face);
-    btn.title = '详情：左键=返回 · 右键=三连；网格：左键=三连锁定图；可拖动；三连也可走 F 键';
+    btn.title = '左键=三连（详情/网格统一）；详情右键=返回；可拖动；三连也可走 F 键';
     document.body.appendChild(btn);
     restorePos();
     attachDragAndClick();
@@ -416,16 +417,15 @@
     });
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
-      // 0.2.15（用户要求）：详情页右键 = 三连；网格右键仍无动作
-      if (pageKind() === 'detail') { J('按钮右键（→三连）'); onClickButton(); }
+      // 0.2.16（用户拍板 B）：详情页右键 = 返回；网格右键仍无动作
+      if (pageKind() === 'detail') { J('按钮右键（→返回）'); goBackNow(); }
       else J('按钮右键（非详情页无动作）');
     });
   }
 
-  /* 0.1.9 手势（用户拍板）：详情页左键=直接返回、右键=三连；网格左键=三连锁定目标 */
+  /* 0.2.16 手势（用户拍板 B）：左键=三连（详情/网格统一）；右键=详情页返回、网格无动作 */
   function onLeftClick() {
     if (state.busy) { J('左键被 busy 挡下'); return; }
-    if (pageKind() === 'detail') { goBackNow(); return; }
     onClickButton();
   }
 
