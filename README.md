@@ -40,7 +40,7 @@
 | `downloadSubfolder` | `'derpi'` | 下载子目录；`''` 存下载根目录 |
 | `autoBack` | `true` | 详情页成功后自动回上一页 |
 | `autoBackDelayMs` | `[1000, 3000]` | 随机等待毫秒区间；固定值写 `[1500,1500]` |
-| `triShotTiming` | `'stagger'` | 三连时序：`stagger` 错峰（收藏先发、下载晚 300ms）/ `parallel` 并行 / `serial` 串行 |
+| `triShotTiming` | `'dispatch'` | 三连时序：`dispatch` 发出即走（收藏+下载请求发车就返回，不等回包；发出前预检登录）/ `stagger` 错峰等回包 / `parallel` / `serial` |
 | `staggerMs` | `300` | 错峰模式下下载晚发车的毫秒数（收藏先走，避免大图抢带宽） |
 | `buttonDefault` | `{xPct:96, yPct:40}` | 首次停靠位置；拖动后记忆（菜单可重置） |
 | `debug` | `true` | 控制台 `[DTS]` 日志 |

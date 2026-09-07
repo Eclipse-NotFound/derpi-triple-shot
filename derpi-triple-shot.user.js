@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.6
+// @version      0.1.7
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,18 +19,14 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.6 = 时序存档进脚本存储并显示在自检弹窗（自动返回会清控制台，日志必须落盘才可见）；
- *              弹窗标题动态读版本，兼作"更新是否装上"的凭据）：
- *  - 0.1.4 纯并行的代价：大图下载与收藏请求同时抢代理带宽，收藏回包反而变慢。
- *  - 0.1.5 默认「错峰」：收藏先发、下载延后 staggerMs(300ms) 再走——两头都快；
- *    可切 'parallel'/'serial' 对比；每阶段耗时打进控制台 [DTS·T]，速度问题用数据定案。
- *  - 403 病根确诊：站内收藏按钮 a.interaction--fave 是 href="#" 的假链接（JS 动态处理），
- *    0.1.1 拿它当提交地址打到了错误路由。修复：一律 POST /images/<id>/fave，
- *    暗号按站内惯例走表单参数 _csrf_token + X-CSRF-Token 头双保险。
- *  - 下载直链实证：详情页 a[href*="/img/download/"] 首枚=带标签文件名版（站内"下载"主按钮同款，
- *    + 号即空格）；网格容器自带 data-uris JSON，/img/view/→/img/download/ 替换成立（🧪转正）。
- *  - 0.1.1：详情页判定改 URL 权威、按钮/自检菜单全页常开（0.1.0 详情页误判修复）。
- *  - 下载模式=浏览器 API 已设好（子目录生效的前提）。
+ * 里程碑备注（0.1.7 = 新增 dispatch 模式并设为默认：收藏+下载请求发出即返回，不等任何回包）：
+ *  - 已知代价（用户拍板接受的）：返回会把页面冻进缓存，收藏结果无人回读——失败静默。
+ *  - 对策：发出前预检登录态（页头有退出登录链接=已登录）；未登录直接拒发并红字提示。
+ *  - 下载走 chrome.downloads（浏览器进程），页面冻结不影响传输，发出即安全。
+ *  - 想退回"等收藏回包再走"：triShotTiming 改回 'stagger' 一行字。
+ *  （0.1.6 时序存档+动态版本标题；0.1.5 三时序开关+时间戳；0.1.4 并行；0.1.2 fixtures 收口修 403：
+ *    收藏按钮是 href="#" 假链接，一律 POST /images/<id>/fave + 表单参数 _csrf_token + 头双保险；
+ *    下载直链=详情页 a[href*="/img/download/"] 首枚 / 网格 data-uris 的 view→download 替换。）
  */
 
 (function () {
@@ -42,8 +38,8 @@
     autoBack:          true,         // 详情页三连成功后自动回上一页（搜索页）
     autoBackDelayMs:   [1000, 3000], // 随机等待区间（毫秒）；想固定 1.5 秒写 [1500, 1500]
     buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
-    triShotTiming:     'stagger',   // 三连时序：'stagger' 错峰（推荐）| 'parallel' 并行 | 'serial' 串行
-    staggerMs:         300,         // 错峰模式下，下载比收藏晚发车的毫秒数（给收藏留出带宽头筹）
+    triShotTiming:     'dispatch',  // 三连时序：'dispatch' 发出即走（默认，激进）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
+    staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
   /* ===================== 配置区结束 ===================== */
@@ -171,6 +167,19 @@
     });
   }
 
+  /* dispatch 模式专用：下载入队即算数——chrome.downloads 在浏览器进程传输，
+   * 页面冻结死不掉的；但 URL 解析必须先完成（罕见兜底路径可能多花一二百毫秒）。 */
+  async function dispatchDownload(ctx) {
+    if (typeof GM_download !== 'function') throw new Error('GM_download 不可用——检查「允许用户脚本」开关');
+    const { url, name } = await resolveDownload(ctx);
+    const target = (CONFIG.downloadSubfolder ? CONFIG.downloadSubfolder + '/' : '') + name;
+    gmDownload(url, target).catch((e) => {
+      LOG('子目录下载失败，退化平铺：', e.message);
+      gmDownload(url, 'derpi_' + name).catch(() => {});
+    });
+    return { name: target };
+  }
+
   async function downloadImage(ctx) {
     const { url, name } = await resolveDownload(ctx);
     const target = (CONFIG.downloadSubfolder ? CONFIG.downloadSubfolder + '/' : '') + name;
@@ -187,20 +196,36 @@
 
   /* ---------------- 三连主流程 ---------------- */
 
-  /* 三连时序（0.1.5）：stagger=收藏先发、下载延迟跟进（默认，治 0.1.4 的带宽争抢）；
-   * parallel=同时发车；serial=等收藏回包再下载。每阶段耗时记入控制台 [DTS·T]。
-   * 两路各自记账（Q8 拍板：三动作独立执行独立记结果），任一失败都如实列出。 */
+  /* 三连时序：dispatch=发出即走（默认，用户拍板的激进模式）；stagger=错峰（收藏先发车）；
+   * parallel=同时发车等两路结果；serial=串行等结果。dispatch 的代价：页面返回即冻结，
+   * 收藏回包无人读——失败静默，用发出前登录预检堵住最大的坑。 */
   async function triShot(ctx) {
     if (!ctx.id) throw new Error('找不到图片 ID');
+    const mode = CONFIG.triShotTiming;
     const t0 = performance.now();
     const marks = { 点击: 0 };
     const rec = (label) => { marks[label] = Math.round(performance.now() - t0); };
-    const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e }));
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e }));
+
+    if (mode === 'dispatch') {
+      if (!document.querySelector('a[href="/sessions"][data-method="delete"]')) {
+        throw new Error('未登录——dispatch 模式无法事后报告，已拒绝发出（请先登录，或把 triShotTiming 改回 stagger）');
+      }
+      postFave(ctx).catch((e) => LOG('收藏结果（页面冻结后不可见）：', e.message)); // 发出即结案
+      rec('收藏发出');
+      await wait(CONFIG.staggerMs); // 给收藏请求留出带宽头筹（staggerMs 同样作用于 dispatch）
+      let dl;
+      try { dl = await dispatchDownload(ctx); } catch (e) { throw new Error('下载未发出：' + e.message); }
+      rec('下载发车');
+      const line = `时序=dispatch #${ctx.id} ${JSON.stringify(marks)}（回包不回读）`;
+      console.log('[DTS·T] ' + line);
+      if (typeof GM_setValue === 'function') GM_setValue('lastTiming', line);
+      return { inter: null, dl, dispatched: true };
+    }
 
     const faveP = settle((async () => { rec('收藏发出'); const r = await postFave(ctx); rec('收藏回包'); return r; })());
     const dlP = settle((async () => {
-      const mode = CONFIG.triShotTiming;
       if (mode === 'stagger') await wait(CONFIG.staggerMs);
       else if (mode === 'serial') await faveP;
       rec('下载发车');
@@ -313,9 +338,14 @@
     try {
       const res = await triShot(ctx);
       setFace('ok');
-      const i = res.inter || {};
-      toast(`三连成功 #${ctx.id} ✓（服务器回包：收藏 ${i.faves ?? '?'}，得分 ${i.score ?? '?'}）`);
-      LOG('成功：', ctx.id, res.inter, res.dl.name);
+      if (res.dispatched) {
+        toast(`三连已发出 #${ctx.id} ✓（不等回包，即将返回）`);
+        LOG('已发出：', ctx.id, res.dl.name);
+      } else {
+        const i = res.inter || {};
+        toast(`三连成功 #${ctx.id} ✓（服务器回包：收藏 ${i.faves ?? '?'}，得分 ${i.score ?? '?'}）`);
+        LOG('成功：', ctx.id, res.inter, res.dl.name);
+      }
       if (kind === 'detail') scheduleAutoBack();
     } catch (e) {
       setFace('fail');
