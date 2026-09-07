@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.4
+// @version      0.2.5
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,6 +19,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.5 = E 键翻页（用户需求：从前一页切到后一页；沿用站内 a.js-next，fixtures 已实证
+ *              62→63→64 结构）；另提醒：菜单缺「清空活动日志」= 装的是 ≤0.2.3，0.2.4 双下载修复未生效）：
  * 里程碑备注（0.2.4 = 双下载隐患修复：文件名限长 150（带标签版可达 220+ 字符，路径超长触发
  *              子目录失败→平铺重试，制造双下载）；dispatchDownload 改单次尝试不自动重试；
  *              活动日志 40→250 条 + 「🧹 清空活动日志」菜单，供复现取证）：
@@ -53,6 +55,7 @@
     triShotTiming:     'dispatch',  // 三连时序：'dispatch' 发出即走（默认，激进）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
     hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
     navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
+    pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -487,7 +490,8 @@
     const key = (e.key || '').toLowerCase();
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
-    if (!isF && !isD) return;
+    const isE = key === CONFIG.pageHotkey;
+    if (!isF && !isD && !isE) return;
     if (isTextTarget(e.target)) return;                        // 搜索框/标签编辑器里打字永不触发
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
@@ -496,7 +500,10 @@
       if (c) setTargetFromEl(c);
     }
     J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
-    if (isF) {
+    if (isE) {
+      if (kind === 'grid') gotoRelPage(+1);                     // 搜索/标签页：翻到下一页
+      else J('E 仅作用于搜索/网格页');
+    } else if (isF) {
       if (kind === 'detail') runHotkey(detailContext(), true);   // 详情页：补下载 + 自动返回
       else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false); // 网格：补下载（收藏交给站方自己的 F）
       else J('F 无目标，只余站方原生收藏');
@@ -512,6 +519,14 @@
     const a = state.targetEl && state.targetEl.querySelector('a[href^="/images/"]');
     location.assign(a ? a.getAttribute('href') : '/images/' + state.targetId);
     LOG('D 进入详情 #' + state.targetId);
+  }
+
+  /* E 键：搜索/标签页翻到下一页（0.2.5；沿用站内 a.js-next，js-prev 预留） */
+  function gotoRelPage(dir) {
+    const a = dir > 0 ? document.querySelector('a.js-next') : document.querySelector('a.js-prev');
+    if (!a) { toast(dir > 0 ? '已是最后一页' : '已是第一页'); return; }
+    J('E 翻页 → ' + a.getAttribute('href').slice(0, 70));
+    location.assign(a.getAttribute('href'));
   }
 
   async function runHotkey(ctx, withBack) {
