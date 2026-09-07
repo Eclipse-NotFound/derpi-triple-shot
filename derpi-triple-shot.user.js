@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.11
+// @version      0.2.12
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.12 = W 无反应排查：匹配必留痕，零日志=未匹配→嫌疑旧版键位仍是 R。对策：加载日志烙
+ *              完整键位表（F/D/E/Q/去屏蔽）；未匹配的单字母按键留痕；日志文案改随配置显示）：
  * 里程碑备注（0.2.11 = 右键审计修复 + Q 键三连：审计确认 0.2.10 右键不再触发左键/三连路径，
  *              唯一漏网是右键拖拽仍会移动按钮（拖动不辨按键）→ 仅左键参与拖动判定，右键/中键全惰性；
  *              原右键按钮的三连程序（onClickButton）整体移植到 Q 键，触发方式外零改动）：
@@ -124,7 +126,13 @@
     const isE = key === CONFIG.pageHotkey;
     const isR = key === CONFIG.unfilterHotkey;
     const isQ = key === CONFIG.triHotkey;
-    if (!isF && !isD && !isE && !isR && !isQ) return;
+    if (!isF && !isD && !isE && !isR && !isQ) {
+      // 0.2.12：未匹配的单字母按键留痕（定位"某键无反应"是没装对/键位不符/事件未达）；输入区内不打
+      if (key.length === 1 && !isTextTarget(e.target)) {
+        J(`key ${key.toUpperCase()} 未匹配（键位 F/D/E/Q/去屏蔽=${CONFIG.unfilterHotkey}）`);
+      }
+      return;
+    }
     if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
@@ -136,9 +144,10 @@
       onClickButton();   // 0.2.11：原右键按钮的三连程序 → Q 键（仅触发方式改变）
     } else if (isR) {
       // 详情页确有屏蔽且开关开时接管去屏蔽，并阻断站方 r=随机图；否则放行
+      const UK = CONFIG.unfilterHotkey.toUpperCase();
       if (kind === 'detail' && unfilterOn() && unfilterDetail()) e.stopImmediatePropagation();
-      else if (kind === 'detail') J('R 放行（开关关或大图已在显示，不接管站方随机）');
-      else J('R 仅作用于详情页');
+      else if (kind === 'detail') J(UK + ' 放行（开关关或大图已在显示，不接管站方随机）');
+      else J(UK + ' 仅作用于详情页');
     } else if (isE) {
       if (kind === 'grid') gotoRelPage(+1);
       else J('E 仅作用于搜索/网格页');
@@ -588,7 +597,7 @@
     const pic = document.querySelector('.image-show picture, .image-target picture');
     if (!link) return false;
     if (pic && pic.querySelector('img')) return false;      // 大图已在显示，无需解除
-    J('R 去屏蔽 #' + (link.getAttribute('data-click-unfilter') || ''));
+    J(CONFIG.unfilterHotkey.toUpperCase() + ' 去屏蔽 #' + (link.getAttribute('data-click-unfilter') || ''));
     link.click();                                            // 交由站方原生处理器完成
     toast('已解除屏蔽，正在显示大图');
     return true;
@@ -707,7 +716,10 @@
   /* ---------------- 启动 ---------------- */
 
   function main() {
-    J('脚本加载 v' + scriptVer() + ' kind=' + pageKind());
+    J('脚本加载 v' + scriptVer() +
+      ' 键位 F=' + CONFIG.hotkey + ' D=' + CONFIG.navHotkey + ' E=' + CONFIG.pageHotkey +
+      ' Q=' + CONFIG.triHotkey + ' 去屏蔽=' + CONFIG.unfilterHotkey +
+      ' kind=' + pageKind());
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
       console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开（见 README 排障第 1 条）。');
     }
