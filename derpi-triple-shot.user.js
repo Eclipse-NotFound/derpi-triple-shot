@@ -146,7 +146,10 @@
       // 详情页确有屏蔽且开关开时接管去屏蔽，并阻断站方 r=随机图；否则放行
       const UK = CONFIG.unfilterHotkey.toUpperCase();
       if (kind === 'detail' && unfilterOn() && unfilterDetail()) e.stopImmediatePropagation();
-      else if (kind === 'detail') J(UK + ' 放行（开关关或大图已在显示，不接管站方随机）');
+      else if (kind === 'detail') {
+        J(UK + ' 放行（开关关或大图已在显示，不接管站方随机）');
+        toast(unfilterOn() ? '本图已在显示，无需解除屏蔽' : '去屏蔽开关已关（菜单「🎚 去屏蔽键开关」可开）');
+      }
       else J(UK + ' 仅作用于详情页');
     } else if (isE) {
       if (kind === 'grid') gotoRelPage(+1);
