@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.5
+// @version      0.2.6
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -11,6 +11,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
+// @grant        GM_setClipboard
 // @connect      derpibooru.org
 // @connect      derpicdn.net
 // @run-at       document-idle
@@ -19,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.6 = 取证通道修复：日志一键复制成文字（GM_setClipboard）+「被 busy 挡下」可见 +
+ *              自检报告按钮实例数（>1 = 装了两份脚本，双下载的直接嫌疑））：
  * 里程碑备注（0.2.5 = E 键翻页（用户需求：从前一页切到后一页；沿用站内 a.js-next，fixtures 已实证
  *              62→63→64 结构）；另提醒：菜单缺「清空活动日志」= 装的是 ≤0.2.3，0.2.4 双下载修复未生效）：
  * 里程碑备注（0.2.4 = 双下载隐患修复：文件名限长 150（带标签版可达 220+ 字符，路径超长触发
@@ -80,6 +83,13 @@
     journal.length = 0;
     if (typeof GM_setValue === 'function') GM_setValue('journal', '');
     toast('活动日志已清空');
+  }
+  /* 0.2.6：日志一键复制为文字（alert 内容无法选中复制，改走剪贴板） */
+  function copyJournal() {
+    const data = (typeof GM_getValue === 'function') ? GM_getValue('journal', '') : '';
+    if (typeof GM_setClipboard !== 'function') { toast('GM_setClipboard 不可用'); return; }
+    GM_setClipboard(data);
+    toast('活动日志已复制，直接在对话里 Ctrl+V 粘贴即可');
   }
 
   /* 选择器——2026-09-07 已按真实页面 fixtures 收口（实测✓） */
@@ -348,7 +358,7 @@
 
   /* 0.1.9 手势（用户拍板）：详情页左键=直接返回、右键=三连；网格左键=三连锁定目标 */
   function onLeftClick() {
-    if (state.busy) return;
+    if (state.busy) { J('左键被 busy 挡下'); return; }
     if (pageKind() === 'detail') { goBackNow(); return; }
     onClickButton();
   }
@@ -390,7 +400,7 @@
   }
 
   async function onClickButton() {
-    if (state.busy) return;
+    if (state.busy) { J('按钮三连被 busy 挡下'); return; }
     const kind = pageKind();
     J('按钮三连 kind=' + kind + ' target=' + (state.targetId || '∅'));
     let ctx;
@@ -530,7 +540,10 @@
   }
 
   async function runHotkey(ctx, withBack) {
-    if (state.busy || !ctx.id) return;
+    if (state.busy || !ctx.id) {
+      if (state.busy) J('F 流程被 busy 挡下（若同刻另一路已发车，属正常防重）');
+      return;
+    }
     if (!document.querySelector('a[href="/sessions"][data-method="delete"]')) {
       toast('未登录——站内原生 F 收藏不会生效，下载已跳过');
       return;
@@ -584,6 +597,7 @@
       `GM_download: ${gms.GM_download ? '✓' : '✗（开「允许用户脚本」）'}`,
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
       `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
+      `按钮实例数（>1 = 装了两份脚本，务必删旧条目）: ${document.querySelectorAll('#dts-btn').length}`,
       `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
@@ -649,6 +663,7 @@
       GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
       GM_registerMenuCommand('📋 活动日志', showJournal);
       GM_registerMenuCommand('🧹 清空活动日志', clearJournal);
+      GM_registerMenuCommand('📋 复制活动日志', copyJournal);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
