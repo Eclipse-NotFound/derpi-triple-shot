@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.9
+// @version      0.2.10
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.10 = ①R 撞站方 r=随机 → 去屏蔽键改 W；②右键按钮不再触发三连（用户：右键仍额外下载，
+ *              详情页右击本按 0.1.9 设定即三连，现 F 已是主三连，右击改无动作，杜绝多余下载）：
  * 里程碑备注（0.2.9 = R 键去除详情页屏蔽：程序化点击站内 a[data-click-unfilter]（同 F 走原生思路）；
  *              仅在"解除链接在且大图未载入"时接管，并阻断站方 r=随机图；含菜单「🎚 R键去屏蔽开关」：
  * 里程碑备注（0.2.8 = 键盘早挂修复（数据确诊）：F/E 被站方快捷键处理器先注册吞掉（D 未绑所以通）；
@@ -65,7 +67,7 @@
     hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
     navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
     pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
-    unfilterHotkey:    'r',         // 0.2.9 详情页去屏蔽键（仅在确有屏蔽且开关开时接管；平时保留站方 r=随机）
+    unfilterHotkey:    'w',         // 0.2.10 详情页去屏蔽键（原 R 撞站方 r=随机，改 W；确有屏蔽且开关开时接管）
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -362,7 +364,7 @@
     face.className = 'dts-face';
     face.textContent = '⚡';
     btn.appendChild(face);
-    btn.title = '详情页：左键=返回 · 右键=三连｜网格页：左键=三连锁定图（可拖动）';
+    btn.title = '左键：详情=返回 / 网格=三连锁定图；可拖动；三连主走 F 键（右键已无动作）';
     document.body.appendChild(btn);
     restorePos();
     attachDragAndClick();
@@ -403,8 +405,7 @@
     });
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
-      J('按钮右键（→三连）');
-      if (pageKind() === 'detail') onClickButton();        // 详情页右键 = 三连（0.1.9 手势）
+      J('按钮右键（0.2.10 起无动作：三连主走 F 键，避免多余下载）');
     });
   }
 
