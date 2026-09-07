@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.5
+// @version      0.1.6
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,8 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.5 = 三种时序开关 + 分阶段时间戳；吸收 0.1.4 复盘教训）：
+ * 里程碑备注（0.1.6 = 时序存档进脚本存储并显示在自检弹窗（自动返回会清控制台，日志必须落盘才可见）；
+ *              弹窗标题动态读版本，兼作"更新是否装上"的凭据）：
  *  - 0.1.4 纯并行的代价：大图下载与收藏请求同时抢代理带宽，收藏回包反而变慢。
  *  - 0.1.5 默认「错峰」：收藏先发、下载延后 staggerMs(300ms) 再走——两头都快；
  *    可切 'parallel'/'serial' 对比；每阶段耗时打进控制台 [DTS·T]，速度问题用数据定案。
@@ -212,7 +213,10 @@
     const errs = [];
     if (!f.ok) errs.push('收藏/点赞：' + f.e.message);
     if (!d.ok) errs.push('下载：' + d.e.message);
-    console.log('[DTS·T] 时序=' + CONFIG.triShotTiming + ' ' + JSON.stringify(marks) + (errs.length ? ' 失败：' + errs.join('；') : ''));
+    const timing = `时序=${CONFIG.triShotTiming} #${ctx.id} ${JSON.stringify(marks)}` +
+      (errs.length ? ' 失败：' + errs.join('；') : '');
+    console.log('[DTS·T] ' + timing);
+    if (typeof GM_setValue === 'function') GM_setValue('lastTiming', timing); // 自动返回会清控制台，存档留证
     if (errs.length) throw new Error(errs.join('；') + '｜另一路已完成');
     return { inter: f.v, dl: d.v };
   }
@@ -379,9 +383,11 @@
       `GM_download: ${gms.GM_download ? '✓' : '✗（开「允许用户脚本」）'}`,
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
       `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
+      `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
-    alert('[Derpi Triple Shot 自检 0.1.2]\n\n' + lines.join('\n'));
+    const ver = (typeof GM_info === 'object' && GM_info.script) ? GM_info.script.version : '?';
+    alert('[Derpi Triple Shot 自检 v' + ver + ']\n\n' + lines.join('\n'));
   }
 
   /* ---------------- 样式 ---------------- */
