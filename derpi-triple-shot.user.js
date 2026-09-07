@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.3
+// @version      0.2.4
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,6 +19,9 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.4 = 双下载隐患修复：文件名限长 150（带标签版可达 220+ 字符，路径超长触发
+ *              子目录失败→平铺重试，制造双下载）；dispatchDownload 改单次尝试不自动重试；
+ *              活动日志 40→250 条 + 「🧹 清空活动日志」菜单，供复现取证）：
  * 里程碑备注（0.2.3 = 全手势活动日志（GM 存储环形 40 条，菜单「📋 活动日志」可读）+ 键盘改捕获期监听 +
  *              网格 D 现场锁定兜底；目标：用数据揪出"详情页左键仍触发下载"与"网格 D 无反应"两症）：
  * 里程碑备注（0.2.2 = 左键返回竞态修复：返回前 backNow 先锁按钮+作废在途流程，30ms 后离场；
@@ -57,18 +60,23 @@
 
   const LOG = (...a) => { if (CONFIG.debug) console.log('[DTS]', ...a); };
 
-  /* 0.2.3 活动日志：环形 40 条、每条落 GM 存储（跨页面保留）；菜单「📋 活动日志」读出 */
+  /* 0.2.3 活动日志：环形 250 条、每条落 GM 存储（跨页面保留）；菜单「📋 活动日志」读出 */
   const journal = [];
   function J(msg) {
     const line = new Date().toTimeString().slice(0, 8) + ' ' + msg;
     journal.push(line);
-    if (journal.length > 40) journal.shift();
+    if (journal.length > 250) journal.shift();
     if (typeof GM_setValue === 'function') GM_setValue('journal', journal.join('\n'));
     if (CONFIG.debug) console.log('[DTS·J]', msg);
   }
   function showJournal() {
     const data = (typeof GM_getValue === 'function') ? GM_getValue('journal', '') : '';
-    alert('[活动日志（最近 40 条，倒序在后）]\n\n' + (data || '（空——请先复现一次问题）'));
+    alert('[活动日志（最近 250 条）]\n\n' + (data || '（空——请先复现一次问题）'));
+  }
+  function clearJournal() {
+    journal.length = 0;
+    if (typeof GM_setValue === 'function') GM_setValue('journal', '');
+    toast('活动日志已清空');
   }
 
   /* 选择器——2026-09-07 已按真实页面 fixtures 收口（实测✓） */
@@ -162,6 +170,11 @@
     let name = seg;
     try { name = decodeURIComponent(seg.replace(/\+/g, ' ')); } catch (e) { /* 保留原样 */ }
     if (!/\.\w{2,5}$/.test(name)) name += '.png';
+    // 0.2.4：截断超长文件名（带标签版可达 220+ 字符），避免路径超长触发“失败→重试”的双下载
+    if (name.length > 150) {
+      const m = name.match(/\.\w{2,5}$/);
+      name = name.slice(0, 150 - (m ? m[0].length : 0)) + (m ? m[0] : '');
+    }
     return name;
   }
 
@@ -199,11 +212,9 @@
     if (typeof GM_download !== 'function') throw new Error('GM_download 不可用——检查「允许用户脚本」开关');
     const { url, name } = await resolveDownload(ctx);
     const target = (CONFIG.downloadSubfolder ? CONFIG.downloadSubfolder + '/' : '') + name;
-    J('下载发车 #' + ctx.id + ' → ' + target.slice(0, 40));
-    gmDownload(url, target).catch((e) => {
-      J('子目录下载失败，退化平铺：' + e.message);
-      gmDownload(url, 'derpi_' + name).catch(() => {});
-    });
+    J('下载发车 #' + ctx.id + ' → ' + target.slice(0, 48));
+    // 0.2.4：单次尝试，不再自动重试（重试=双下载）；文件名已在上游限长
+    gmDownload(url, target).catch((e) => { J('下载失败（不重试）：' + e.message); });
     return { name: target };
   }
 
@@ -622,6 +633,7 @@
       GM_registerMenuCommand('▶️ 自检当前页面', runSelfTest);
       GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
       GM_registerMenuCommand('📋 活动日志', showJournal);
+      GM_registerMenuCommand('🧹 清空活动日志', clearJournal);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
