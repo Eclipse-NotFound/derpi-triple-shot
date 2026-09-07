@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.9
+// @version      0.2.0
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,8 +19,10 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.9 = 手势重排（用户拍板 A/A）：详情页左键=直接返回（零操作）、右键=三连；
- *              网格页左键=对锁定目标三连（不变）。按钮上右键菜单已压制）：
+ * 里程碑备注（0.2.0 = 键盘三连（用户拍板 A/A/A）：F 键纯搭载——收藏+点赞走站内原生处理器（星星实时点亮），
+ *              插件对同一次按键只补发下载（详情页再加自动返回）；网格/详情通用，⚡ 按钮退役为鼠标备用。
+ *              护栏：输入框/编辑器焦点、Ctrl/Alt/Meta/Shift 修饰键、按键连发(e.repeat)一律不触发；未登录拒发并提示。
+ *  0.1.9 手势重排：详情页左键=直接返回、右键=三连；网格左键=三连。
  *  0.1.7 dispatch 发出即走：收藏+下载请求发车即返回，不等任何回包；
  *  - 已知代价（用户拍板接受的）：返回会把页面冻进缓存，收藏结果无人回读——失败静默。
  *  - 对策：发出前预检登录态（页头有退出登录链接=已登录）；未登录直接拒发并红字提示。
@@ -41,6 +43,7 @@
     autoBackDelayMs:   [300, 600],  // 返回前停顿（dispatch 模式回包不等，这段纯为让你瞄一眼提示）；真·秒回写 [0, 0]
     buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
     triShotTiming:     'dispatch',  // 三连时序：'dispatch' 发出即走（默认，激进）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
+    hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -346,9 +349,7 @@
       ctx = detailContext();
     } else if (kind === 'grid') {
       if (!state.targetId) { toast('先把鼠标停在某张图上，再点三连'); return; }
-      let viewUrl = null;
-      try { viewUrl = JSON.parse(state.targetEl.getAttribute(SEL.urisAttr)).full; } catch (e) { /* 走 API 兜底 */ }
-      ctx = { id: state.targetId, csrf: getCsrf(), downloadUrl: null, viewUrl };
+      ctx = gridContext();
     } else {
       toast('本页不是图片页/搜索页');
       return;
@@ -406,6 +407,54 @@
     if (face) face.textContent = '⚡';
     LOG('目标锁定 #' + state.targetId);
   });
+
+  /* ---------------- 0.2.0 键盘三连：F=站内原生收藏/点赞，本插件对同一按键补发下载（详情页附返回） ---------------- */
+
+  function isTextTarget(t) {
+    return !!(t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]'));
+  }
+
+  function gridContext() {
+    let viewUrl = null;
+    try { viewUrl = JSON.parse(state.targetEl.getAttribute(SEL.urisAttr)).full; } catch (e) { /* 走 API 兜底 */ }
+    return { id: state.targetId, csrf: getCsrf(), downloadUrl: null, viewUrl };
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    if ((e.key || '').toLowerCase() !== CONFIG.hotkey) return;
+    if (isTextTarget(e.target)) return;                        // 搜索框/标签编辑器里打字永不触发
+    const kind = pageKind();
+    if (kind === 'detail') runHotkey(detailContext(), true);   // 详情页：补下载 + 自动返回
+    else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false); // 网格：补下载（收藏交给站方自己的 F）
+  });
+
+  async function runHotkey(ctx, withBack) {
+    if (state.busy || !ctx.id) return;
+    if (!document.querySelector('a[href="/sessions"][data-method="delete"]')) {
+      toast('未登录——站内原生 F 收藏不会生效，下载已跳过');
+      return;
+    }
+    state.busy = true;
+    setFace('busy');
+    try {
+      await dispatchDownload(ctx);   // 入队即结案；下载由浏览器进程完成，页面返回冻结不影响
+      setFace('ok');
+      toast(`三连已发出 #${ctx.id} ✓（收藏=站内原生，下载已入队）`);
+      const line = `时序=hotkey #${ctx.id} 下载入队（收藏/点赞=站内F原生）`;
+      console.log('[DTS·T] ' + line);
+      if (typeof GM_setValue === 'function') GM_setValue('lastTiming', line);
+      if (withBack) scheduleAutoBack();
+    } catch (e) {
+      setFace('fail');
+      toast('快捷键三连失败：' + e.message);
+      LOG('hotkey:', e);
+    } finally {
+      state.busy = false;
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => setFace('idle'), 2500);
+    }
+  }
 
   /* ---------------- 自检（Tampermonkey 菜单） ---------------- */
 
