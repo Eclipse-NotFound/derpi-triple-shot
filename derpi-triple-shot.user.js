@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.8
+// @version      0.1.9
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,8 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.8 = 返回前停顿缩到 300–600ms（原 1–3 秒是给等回包版本看数字用的，dispatch 下白等））：
+ * 里程碑备注（0.1.9 = 手势重排（用户拍板 A/A）：详情页左键=直接返回（零操作）、右键=三连；
+ *              网格页左键=对锁定目标三连（不变）。按钮上右键菜单已压制）：
  *  0.1.7 dispatch 发出即走：收藏+下载请求发车即返回，不等任何回包；
  *  - 已知代价（用户拍板接受的）：返回会把页面冻进缓存，收藏结果无人回读——失败静默。
  *  - 对策：发出前预检登录态（页头有退出登录链接=已登录）；未登录直接拒发并红字提示。
@@ -278,7 +279,7 @@
     face.className = 'dts-face';
     face.textContent = '⚡';
     btn.appendChild(face);
-    btn.title = '三连：收藏+点赞+下载（可拖动）';
+    btn.title = '详情页：左键=返回 · 右键=三连｜网格页：左键=三连锁定图（可拖动）';
     document.body.appendChild(btn);
     restorePos();
     attachDragAndClick();
@@ -299,7 +300,7 @@
   function attachDragAndClick() {
     let down = null, dragged = false;
     btn.addEventListener('pointerdown', (e) => {
-      down = { x: e.clientX, y: e.clientY, bx: btn.offsetLeft, by: btn.offsetTop };
+      down = { x: e.clientX, y: e.clientY, bx: btn.offsetLeft, by: btn.offsetTop, button: e.button };
       dragged = false;
       btn.setPointerCapture(e.pointerId);
     });
@@ -312,11 +313,29 @@
         btn.style.top  = clamp(down.by + dy, 8, innerHeight - 62) + 'px';
       }
     });
-    btn.addEventListener('pointerup', () => {
+    btn.addEventListener('pointerup', (e) => {
       if (down && dragged) GM_setValue('btnPos', { x: btn.offsetLeft, y: btn.offsetTop });
-      else if (down) onClickButton();
+      else if (down && e.button === 0) onLeftClick();   // 右键走 contextmenu，不在这里触发
       down = null;
     });
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
+      if (pageKind() === 'detail') onClickButton();        // 详情页右键 = 三连（0.1.9 手势）
+    });
+  }
+
+  /* 0.1.9 手势（用户拍板）：详情页左键=直接返回、右键=三连；网格左键=三连锁定目标 */
+  function onLeftClick() {
+    if (state.busy) return;
+    if (pageKind() === 'detail') { goBackNow(); return; }
+    onClickButton();
+  }
+
+  function goBackNow() {
+    const ref = document.referrer || '';
+    if (!ref.includes(location.hostname)) { toast('本页没有站内来路，不返回（新标签可手动关）'); return; }
+    if (history.length > 1) history.back();
+    else window.close();
   }
 
   async function onClickButton() {
