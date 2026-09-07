@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.10
+// @version      0.2.11
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,9 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.11 = 右键审计修复 + Q 键三连：审计确认 0.2.10 右键不再触发左键/三连路径，
+ *              唯一漏网是右键拖拽仍会移动按钮（拖动不辨按键）→ 仅左键参与拖动判定，右键/中键全惰性；
+ *              原右键按钮的三连程序（onClickButton）整体移植到 Q 键，触发方式外零改动）：
  * 里程碑备注（0.2.10 = ①R 撞站方 r=随机 → 去屏蔽键改 W；②右键按钮不再触发三连（用户：右键仍额外下载，
  *              详情页右击本按 0.1.9 设定即三连，现 F 已是主三连，右击改无动作，杜绝多余下载）：
  * 里程碑备注（0.2.9 = R 键去除详情页屏蔽：程序化点击站内 a[data-click-unfilter]（同 F 走原生思路）；
@@ -68,6 +71,7 @@
     navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
     pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
     unfilterHotkey:    'w',         // 0.2.10 详情页去屏蔽键（原 R 撞站方 r=随机，改 W；确有屏蔽且开关开时接管）
+    triHotkey:         'q',         // 0.2.11 三连键：原"右键按钮触发"的三连程序改由 Q 触发（触发方式外其余不变）
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -119,7 +123,8 @@
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
     const isR = key === CONFIG.unfilterHotkey;
-    if (!isF && !isD && !isE && !isR) return;
+    const isQ = key === CONFIG.triHotkey;
+    if (!isF && !isD && !isE && !isR && !isQ) return;
     if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
@@ -127,7 +132,9 @@
       if (c) setTargetFromEl(c);
     }
     J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
-    if (isR) {
+    if (isQ) {
+      onClickButton();   // 0.2.11：原右键按钮的三连程序 → Q 键（仅触发方式改变）
+    } else if (isR) {
       // 详情页确有屏蔽且开关开时接管去屏蔽，并阻断站方 r=随机图；否则放行
       if (kind === 'detail' && unfilterOn() && unfilterDetail()) e.stopImmediatePropagation();
       else if (kind === 'detail') J('R 放行（开关关或大图已在显示，不接管站方随机）');
@@ -385,6 +392,7 @@
   function attachDragAndClick() {
     let down = null, dragged = false;
     btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;   // 0.2.11 审计修复：仅左键参与拖动/点击判定，右键/中键完全惰性
       down = { x: e.clientX, y: e.clientY, bx: btn.offsetLeft, by: btn.offsetTop, button: e.button };
       dragged = false;
       btn.setPointerCapture(e.pointerId);
