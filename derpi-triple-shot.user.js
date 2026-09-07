@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.12
+// @version      0.2.13
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.13 = 收拢下载入口：Q 三连摘除（Q 也触发下载，与 F 重复，用户不满）→ 下载仅 F 触发；
+ *              详情页右键 = D 键行为（返回上一页），右键回归纯导航）：
  * 里程碑备注（0.2.12 = W 无反应排查：匹配必留痕，零日志=未匹配→嫌疑旧版键位仍是 R。对策：加载日志烙
  *              完整键位表（F/D/E/Q/去屏蔽）；未匹配的单字母按键留痕；日志文案改随配置显示）：
  * 里程碑备注（0.2.11 = 右键审计修复 + Q 键三连：审计确认 0.2.10 右键不再触发左键/三连路径，
@@ -73,7 +75,6 @@
     navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
     pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
     unfilterHotkey:    'w',         // 0.2.10 详情页去屏蔽键（原 R 撞站方 r=随机，改 W；确有屏蔽且开关开时接管）
-    triHotkey:         'q',         // 0.2.11 三连键：原"右键按钮触发"的三连程序改由 Q 触发（触发方式外其余不变）
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -125,11 +126,10 @@
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
     const isR = key === CONFIG.unfilterHotkey;
-    const isQ = key === CONFIG.triHotkey;
-    if (!isF && !isD && !isE && !isR && !isQ) {
+    if (!isF && !isD && !isE && !isR) {
       // 0.2.12：未匹配的单字母按键留痕（定位"某键无反应"是没装对/键位不符/事件未达）；输入区内不打
       if (key.length === 1 && !isTextTarget(e.target)) {
-        J(`key ${key.toUpperCase()} 未匹配（键位 F/D/E/Q/去屏蔽=${CONFIG.unfilterHotkey}）`);
+        J(`key ${key.toUpperCase()} 未匹配（键位 F/D/E/去屏蔽=${CONFIG.unfilterHotkey}）`);
       }
       return;
     }
@@ -140,9 +140,7 @@
       if (c) setTargetFromEl(c);
     }
     J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
-    if (isQ) {
-      onClickButton();   // 0.2.11：原右键按钮的三连程序 → Q 键（仅触发方式改变）
-    } else if (isR) {
+    if (isR) {
       // 详情页确有屏蔽且开关开时接管去屏蔽，并阻断站方 r=随机图；否则放行
       const UK = CONFIG.unfilterHotkey.toUpperCase();
       if (kind === 'detail' && unfilterOn() && unfilterDetail()) e.stopImmediatePropagation();
@@ -380,7 +378,7 @@
     face.className = 'dts-face';
     face.textContent = '⚡';
     btn.appendChild(face);
-    btn.title = '左键：详情=返回 / 网格=三连锁定图；可拖动；三连主走 F 键（右键已无动作）';
+    btn.title = '左键/右键：详情=返回（右键同 D 键）；网格左键=三连锁定图；可拖动；三连主走 F 键';
     document.body.appendChild(btn);
     restorePos();
     attachDragAndClick();
@@ -422,7 +420,9 @@
     });
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
-      J('按钮右键（0.2.10 起无动作：三连主走 F 键，避免多余下载）');
+      // 0.2.13：详情页右键 = D 键行为（返回上一页）；其余页面无动作
+      if (pageKind() === 'detail') { J('按钮右键（=D 键：返回）'); goBackNow(); }
+      else J('按钮右键（非详情页无动作）');
     });
   }
 
