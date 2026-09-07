@@ -17,7 +17,7 @@ if (files.length === 0) {
 }
 
 const CHECKS = [
-  { name: 'CSRF meta（候选 meta[name="csrf-token"]）', re: /name=["']csrf-token["'][^>]*content=["']([^"']{10,})/i, critical: true },
+  { name: 'CSRF meta（属性顺序无关）', re: /<meta[^>]*name=["']csrf-token["'][^>]*>/i, critical: true },
   { name: 'CSRF meta 备选写法（meta[name="csrf"]）', re: /name=["']csrf["']/i, critical: false },
   { name: '图片容器 data-image-id', re: /data-image-id=["'](\d+)["']/i, critical: true },
   { name: '标签属性 data-image-tags', re: /data-image-tags=["']/i, critical: false },

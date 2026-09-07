@@ -38,7 +38,6 @@
 | 项 | 默认 | 说明 |
 |---|---|---|
 | `downloadSubfolder` | `'derpi'` | 下载子目录；`''` 存下载根目录 |
-| `filenameFallback` | `'derpi_{id}'` | 拿不到站内文件名时的退化模板 |
 | `autoBack` | `true` | 详情页成功后自动回上一页 |
 | `autoBackDelayMs` | `[1000, 3000]` | 随机等待毫秒区间；固定值写 `[1500,1500]` |
 | `buttonDefault` | `{xPct:96, yPct:40}` | 首次停靠位置；拖动后记忆（菜单可重置） |

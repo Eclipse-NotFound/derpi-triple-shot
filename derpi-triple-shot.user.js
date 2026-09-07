@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.1
+// @version      0.1.2
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,11 +19,14 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.1 = M2 选择器第一轮收口）：
- *  - 0.1.0 实测：详情页被误判为"其他页"（容器选择器未命中真实 DOM），按钮不出现。
- *    修复：详情页判定以 URL 为准（/images/<id> 路径，query 任意），不再依赖容器选择器。
- *  - 按钮与自检菜单全页常开：任何页都能跑「▶️ 自检当前页面」回报 DOM 事实。
- *  - 下载建议把 Tampermonkey 设置 → 下载模式 选 浏览器 API（已设好），子目录才生效。
+ * 里程碑备注（0.1.2 = 真实页面 fixtures 收口，2026-09-07）：
+ *  - 403 病根确诊：站内收藏按钮 a.interaction--fave 是 href="#" 的假链接（JS 动态处理），
+ *    0.1.1 拿它当提交地址打到了错误路由。修复：一律 POST /images/<id>/fave，
+ *    暗号按站内惯例走表单参数 _csrf_token + X-CSRF-Token 头双保险。
+ *  - 下载直链实证：详情页 a[href*="/img/download/"] 首枚=带标签文件名版（站内"下载"主按钮同款，
+ *    + 号即空格）；网格容器自带 data-uris JSON，/img/view/→/img/download/ 替换成立（🧪转正）。
+ *  - 0.1.1：详情页判定改 URL 权威、按钮/自检菜单全页常开（0.1.0 详情页误判修复）。
+ *  - 下载模式=浏览器 API 已设好（子目录生效的前提）。
  */
 
 (function () {
@@ -32,7 +35,6 @@
   /* ===================== 配置区（改这里即可） ===================== */
   const CONFIG = {
     downloadSubfolder: 'derpi',      // 存到浏览器默认下载目录下的子文件夹；'' = 直接存下载根目录
-    filenameFallback:  'derpi_{id}', // 拿不到站内原版文件名时的退化模板（自动补扩展名）
     autoBack:          true,         // 详情页三连成功后自动回上一页（搜索页）
     autoBackDelayMs:   [1000, 3000], // 随机等待区间（毫秒）；想固定 1.5 秒写 [1500, 1500]
     buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
@@ -42,13 +44,14 @@
 
   const LOG = (...a) => { if (CONFIG.debug) console.log('[DTS]', ...a); };
 
-  /* 选择器候选链：按顺序试，命中即用。待 fixtures 验证后收口。 */
+  /* 选择器——2026-09-07 已按真实页面 fixtures 收口（实测✓） */
   const SEL = {
     csrf:          ['meta[name="csrf-token"]', 'meta[name="csrf"]'],
-    detailImage:   ['#image-container', 'div.image-container[data-image-id]'],
+    detailImage:   ['div.image-show-container[data-image-id]', 'div.image-container[data-image-id]'],
     imageIdAttr:   'data-image-id',
-    downloadLink:  ['a[href*="/img/download/"]', 'a[href*="/img/view/"]', 'a[download]', 'a.download-link'],
-    favePostLink:  ['a.interaction--fave[href$="/fave"][data-method="post"]', 'a.interaction--fave'],
+    // 详情页有两枚下载链：首枚=带标签文件名版（站内“下载”主按钮同款），次枚=纯 ID 版
+    downloadLink:  'a[href*="/img/download/"]',
+    urisAttr:      'data-uris', // 网格缩略图容器上的 JSON：{"full":"…/img/view/…png",…}
     thumbImage:    'div.image-container[data-image-id]',
   };
 
@@ -78,37 +81,39 @@
     return m ? (m.getAttribute('content') || null) : null;
   }
 
-  /* 详情页上下文：ID 取自 URL（容器选择器只作补充）、防伪暗号、页面自带的下载/收藏链接 */
+  /* 详情页上下文：ID 取自 URL，防伪暗号 + 站内下载直链（第一枚=带标签文件名版） */
   function detailContext() {
     const m = location.pathname.match(/\/images\/(\d+)/);
     const el = first(SEL.detailImage);
     const id = (m && m[1]) || (el && el.getAttribute(SEL.imageIdAttr));
-    const dl = first(SEL.downloadLink);
-    const fave = first(SEL.favePostLink);
-    return {
-      id,
-      csrf: getCsrf(),
-      downloadUrl: dl ? dl.href : null,
-      faveUrl: fave ? fave.href : null, // 页面自己的收藏链接（data-method="post" 时）优先采用
-    };
+    const dl = document.querySelector(SEL.downloadLink);
+    return { id, csrf: getCsrf(), downloadUrl: dl ? dl.href : null, viewUrl: null };
   }
 
   /* ---------------- 收藏（自带点赞） ---------------- */
 
+  /* fixtures 实证：站内收藏按钮是 href="#" 的假链接，提交地址一律按站内路由构造；
+   * 暗号按站内 form 惯例走表单参数 _csrf_token，另带 X-CSRF-Token 头双保险。 */
   async function postFave(ctx) {
     if (!ctx.csrf) throw new Error('页面里找不到防伪暗号(CSRF)');
-    const url = ctx.faveUrl || `/images/${ctx.id}/fave`;
-    const r = await fetch(url, {
+    const r = await fetch(`/images/${ctx.id}/fave`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'X-CSRF-Token': ctx.csrf, 'Accept': 'application/json' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'X-CSRF-Token': ctx.csrf,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: `_csrf_token=${encodeURIComponent(ctx.csrf)}`,
     });
-    // 未登录时站内会 302 到登录页，fetch 跟随后表现为 HTML 响应
+    // 未登录时站内会 302 到登录页，fetch 跟随后表现为重定向
     if (r.redirected || /\/sessions|\/login/.test(r.url || '')) {
       throw new Error('未登录——请先登录 derpibooru 再用三连');
     }
     const ct = r.headers.get('content-type') || '';
-    if (!r.ok || !ct.includes('json')) throw new Error(`站内返回 ${r.status}（${ct || '未知类型'}）`);
+    if (!r.ok || !ct.includes('json')) {
+      throw new Error(`站内返回 ${r.status}（${ct || '未知类型'}）——刷新页面重试；仍失败请用「▶️ 自检当前页面」回报`);
+    }
     return r.json(); // { score, faves, upvotes, downvotes }
   }
 
@@ -123,57 +128,29 @@
       .then((data) => data.image || (data.images && data.images[0]));
   }
 
-  /* GM_xmlhttpRequest 发 HEAD，读 Content-Disposition 里的站内原版文件名 */
-  function headFilename(url) {
-    return new Promise((resolve) => {
-      if (typeof GM_xmlhttpRequest !== 'function') return resolve(null);
-      GM_xmlhttpRequest({
-        method: 'HEAD',
-        url,
-        timeout: 15000,
-        onload: (res) => {
-          if (res.status >= 400) return resolve(null);
-          const line = String(res.responseHeaders || '')
-            .split(/\r?\n/)
-            .find((l) => /^content-disposition:/i.test(l));
-          resolve(parseFilename(line));
-        },
-        onerror:   () => resolve(null),
-        ontimeout: () => resolve(null),
-      });
-    });
+  /* 站内下载直链的文件名就编码在 URL 尾段（+ 号即空格），无需再问服务器 */
+  function filenameFromUrl(url, id) {
+    const seg = url.split('?')[0].split('/').pop() || `${id}.png`;
+    let name = seg;
+    try { name = decodeURIComponent(seg.replace(/\+/g, ' ')); } catch (e) { /* 保留原样 */ }
+    if (!/\.\w{2,5}$/.test(name)) name += '.png';
+    return name;
   }
 
-  function parseFilename(cd) {
-    if (!cd) return null;
-    const star = cd.match(/filename\*=(?:UTF-8|utf-8)''([^;]+)/);
-    if (star) { try { return decodeURIComponent(star[1].trim()); } catch (e) { /* fallthrough */ } }
-    const plain = cd.match(/filename="?([^";]+)"?/i);
-    return plain ? plain[1].trim() : null;
-  }
-
-  /* 下载直链候选：详情页自带链接 → JSON representations.full 的 /img/download/ 变体（待验证）→ full 本体 */
+  /* 下载直链优先级：详情页站内下载链（带标签文件名版）→ 网格 data-uris 的 view→download 替换
+   * （fixtures 实证成立）→ JSON API representations.full 兜底。 */
   async function resolveDownload(ctx) {
-    const cands = [];
-    if (ctx.downloadUrl) cands.push(ctx.downloadUrl);
-    if (cands.length === 0 || !/\/img\/download\//.test(cands[0])) {
+    let url = ctx.downloadUrl;
+    if (!url && ctx.viewUrl) url = ctx.viewUrl.replace('/img/view/', '/img/download/');
+    if (!url) {
       try {
         const img = await fetchImageJson(ctx.id);
         const full = img && img.representations && img.representations.full;
-        if (full) {
-          cands.push(full.replace('/img/view/', '/img/download/')); // 🧪 该变体待线上验证
-          cands.push(full);
-        }
+        if (full) url = full.replace('/img/view/', '/img/download/');
       } catch (e) { LOG('取图片 JSON 失败：', e.message); }
     }
-    for (const url of cands) {
-      const name = await headFilename(url);
-      if (name) return { url, name };
-    }
-    const url = cands[cands.length - 1];
-    if (!url) throw new Error('找不到下载直链');
-    const m = url.split('?')[0].match(/\.(\w{2,5})$/);
-    return { url, name: `${CONFIG.filenameFallback.replace('{id}', ctx.id)}.${m ? m[1] : 'png'}` };
+    if (!url) throw new Error('找不到下载直链（请用「▶️ 自检当前页面」回报）');
+    return { url, name: filenameFromUrl(url, ctx.id) };
   }
 
   function gmDownload(url, name) {
@@ -291,7 +268,9 @@
       ctx = detailContext();
     } else if (kind === 'grid') {
       if (!state.targetId) { toast('先把鼠标停在某张图上，再点三连'); return; }
-      ctx = { id: state.targetId, csrf: getCsrf(), downloadUrl: null, faveUrl: null };
+      let viewUrl = null;
+      try { viewUrl = JSON.parse(state.targetEl.getAttribute(SEL.urisAttr)).full; } catch (e) { /* 走 API 兜底 */ }
+      ctx = { id: state.targetId, csrf: getCsrf(), downloadUrl: null, viewUrl };
     } else {
       toast('本页不是图片页/搜索页');
       return;
@@ -349,10 +328,13 @@
   function runSelfTest() {
     const kind = pageKind();
     const csrfEl = first(SEL.csrf);
-    const dlCounts = SEL.downloadLink
-      .map((s) => `${s}×${document.querySelectorAll(s).length}`)
-      .join('，');
-    const fave = first(SEL.favePostLink);
+    const dls = [...document.querySelectorAll(SEL.downloadLink)].map((a) => a.getAttribute('href'));
+    const fave = document.querySelector('a.interaction--fave');
+    const probeThumb = document.querySelector(SEL.thumbImage);
+    let uriProbe = '';
+    if (probeThumb) {
+      try { uriProbe = JSON.parse(probeThumb.getAttribute(SEL.urisAttr)).full; } catch (e) { uriProbe = '✗ data-uris 解析失败'; }
+    }
     const thumbs = document.querySelectorAll(SEL.thumbImage).length;
     const gms = {
       GM_download: typeof GM_download === 'function',
@@ -360,16 +342,16 @@
     };
     const lines = [
       `页面类型: ${kind}（路径 ${location.pathname}）`,
-      `防伪暗号(CSRF): ${csrfEl ? '✓ <meta ' + csrfEl.getAttribute('name') + '>' : '✗ 未找到'}`,
-      `下载链接候选命中: ${dlCounts || '无'}`,
-      `收藏链接: ${fave ? '✓ ' + fave.getAttribute('href') + ' [' + (fave.getAttribute('data-method') || '') + ']' : '— 未找到'}`,
-      `网格缩略图容器: ${thumbs} 个`,
+      `防伪暗号(CSRF): ${csrfEl ? '✓' : '✗ 找不到'}`,
+      `下载直链: ${dls.length ? '✓ ' + dls.length + ' 枚（首枚 ' + dls[0].slice(0, 46) + '…）' : '— 本页无（网格页走 data-uris）'}`,
+      `收藏按钮: ${fave ? '✓ 假链接 href=' + fave.getAttribute('href') + '（提交走 /images/<id>/fave）' : '— 未找到'}`,
+      `缩略图容器: ${thumbs} 个；data-uris 首枚: ${uriProbe || '—'}`,
       `GM_download: ${gms.GM_download ? '✓' : '✗（开「允许用户脚本」）'}`,
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
       `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
-    alert('[Derpi Triple Shot 自检 0.1.1]\n\n' + lines.join('\n'));
+    alert('[Derpi Triple Shot 自检 0.1.2]\n\n' + lines.join('\n'));
   }
 
   /* ---------------- 样式 ---------------- */
