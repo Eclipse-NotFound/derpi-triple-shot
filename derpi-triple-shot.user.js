@@ -645,7 +645,7 @@
       `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
       `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
       `按钮实例数（>1 = 装了两份脚本，务必删旧条目）: ${document.querySelectorAll('#dts-btn').length}`,
-      `R键去屏蔽开关: ${unfilterOn() ? '开' : '关'}（键=${CONFIG.unfilterHotkey}）`,
+      `去屏蔽键开关: ${unfilterOn() ? '开' : '关'}（键=${CONFIG.unfilterHotkey}）`,
       `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
@@ -712,7 +712,7 @@
       GM_registerMenuCommand('📋 活动日志', showJournal);
       GM_registerMenuCommand('🧹 清空活动日志', clearJournal);
       GM_registerMenuCommand('📋 复制活动日志', copyJournal);
-      GM_registerMenuCommand('🎚 R键去屏蔽开关', toggleUnfilter);
+      GM_registerMenuCommand('🎚 去屏蔽键开关', toggleUnfilter);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
