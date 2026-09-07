@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.6
+// @version      0.2.7
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -20,6 +20,8 @@
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.7 = E 键无反应自查探针：加载日志带版本号（一眼区分"旧版未装到位"）+
+ *              hotkey 被输入框吞掉时留痕 + 复用版本助手；E 键链路经 grep 自检无码病）：
  * 里程碑备注（0.2.6 = 取证通道修复：日志一键复制成文字（GM_setClipboard）+「被 busy 挡下」可见 +
  *              自检报告按钮实例数（>1 = 装了两份脚本，双下载的直接嫌疑））：
  * 里程碑备注（0.2.5 = E 键翻页（用户需求：从前一页切到后一页；沿用站内 a.js-next，fixtures 已实证
@@ -65,6 +67,11 @@
   /* ===================== 配置区结束 ===================== */
 
   const LOG = (...a) => { if (CONFIG.debug) console.log('[DTS]', ...a); };
+
+  /* 0.2.7：版本助手（日志/自检共用，兼作"到底装的是哪版"的铁证） */
+  function scriptVer() {
+    return (typeof GM_info === 'object' && GM_info.script) ? GM_info.script.version : '?';
+  }
 
   /* 0.2.3 活动日志：环形 250 条、每条落 GM 存储（跨页面保留）；菜单「📋 活动日志」读出 */
   const journal = [];
@@ -502,7 +509,7 @@
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
     if (!isF && !isD && !isE) return;
-    if (isTextTarget(e.target)) return;                        // 搜索框/标签编辑器里打字永不触发
+    if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
       // 悬停追踪万一滞后：按键事件目标本身在缩略图上则现场锁定（0.2.3 兜底）
@@ -601,8 +608,7 @@
       `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
     ];
     console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
-    const ver = (typeof GM_info === 'object' && GM_info.script) ? GM_info.script.version : '?';
-    alert('[Derpi Triple Shot 自检 v' + ver + ']\n\n' + lines.join('\n'));
+    alert('[Derpi Triple Shot 自检 v' + scriptVer() + ']\n\n' + lines.join('\n'));
   }
 
   /* 0.2.1 延时设置菜单项：输入即存（毫秒），留空恢复默认随机区间；无需改代码、无需重装 */
@@ -652,6 +658,7 @@
   /* ---------------- 启动 ---------------- */
 
   function main() {
+    J('脚本加载 v' + scriptVer() + ' kind=' + pageKind());
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
       console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开（见 README 排障第 1 条）。');
     }
