@@ -718,7 +718,7 @@
   function main() {
     J('脚本加载 v' + scriptVer() +
       ' 键位 F=' + CONFIG.hotkey + ' D=' + CONFIG.navHotkey + ' E=' + CONFIG.pageHotkey +
-      ' Q=' + CONFIG.triHotkey + ' 去屏蔽=' + CONFIG.unfilterHotkey +
+      ' 去屏蔽=' + CONFIG.unfilterHotkey +
       ' kind=' + pageKind());
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
       console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开（见 README 排障第 1 条）。');
