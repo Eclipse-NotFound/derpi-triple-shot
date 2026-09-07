@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.0
+// @version      0.2.1
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,8 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.2.0 = 键盘三连（用户拍板 A/A/A）：F 键纯搭载——收藏+点赞走站内原生处理器（星星实时点亮），
+ * 里程碑备注（0.2.1 = D 键导航环（网格→详情→返回）+ 自动返回延时菜单可调（存脚本存储，立即生效））：
+ *  0.2.0 键盘三连：F 键纯搭载——收藏+点赞走站内原生处理器（星星实时点亮），
  *              插件对同一次按键只补发下载（详情页再加自动返回）；网格/详情通用，⚡ 按钮退役为鼠标备用。
  *              护栏：输入框/编辑器焦点、Ctrl/Alt/Meta/Shift 修饰键、按键连发(e.repeat)一律不触发；未登录拒发并提示。
  *  0.1.9 手势重排：详情页左键=直接返回、右键=三连；网格左键=三连。
@@ -44,6 +45,7 @@
     buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
     triShotTiming:     'dispatch',  // 三连时序：'dispatch' 发出即走（默认，激进）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
     hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
+    navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
     staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
     debug:             true,         // 控制台 [DTS] 日志
   };
@@ -259,7 +261,9 @@
       const ref = document.referrer || '';
       const sameSite = ref.includes(location.hostname); // 来路必须是站内页（搜索页），外来客不送
       if (!sameSite) { toast('已完成（无站内来路，不自动返回）'); return; }
-      const [a, b] = CONFIG.autoBackDelayMs;
+      // 0.2.1：菜单设置的固定延时优先（存脚本存储，跨更新保留）；未设置则用配置区默认区间随机
+      const fixed = (typeof GM_getValue === 'function') ? GM_getValue('backDelayMs', null) : null;
+      const [a, b] = (typeof fixed === 'number' && Number.isFinite(fixed)) ? [fixed, fixed] : CONFIG.autoBackDelayMs;
       const delay = Math.round(a + Math.random() * Math.max(0, b - a));
       setTimeout(() => {
         if (history.length > 1) {
@@ -422,12 +426,27 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
-    if ((e.key || '').toLowerCase() !== CONFIG.hotkey) return;
+    const key = (e.key || '').toLowerCase();
+    const isF = key === CONFIG.hotkey;
+    const isD = key === CONFIG.navHotkey;
+    if (!isF && !isD) return;
     if (isTextTarget(e.target)) return;                        // 搜索框/标签编辑器里打字永不触发
     const kind = pageKind();
-    if (kind === 'detail') runHotkey(detailContext(), true);   // 详情页：补下载 + 自动返回
-    else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false); // 网格：补下载（收藏交给站方自己的 F）
+    if (isF) {
+      if (kind === 'detail') runHotkey(detailContext(), true);   // 详情页：补下载 + 自动返回
+      else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false); // 网格：补下载（收藏交给站方自己的 F）
+    } else {
+      if (kind === 'detail') goBackNow();                        // 详情页 D：直接返回上一页
+      else if (kind === 'grid' && state.targetId) openTarget();  // 网格 D：当前标签页进入悬停图的详情页
+    }
   });
+
+  /* 网格 D：优先用缩略图自己的链接（保留 ?q= 浏览上下文），退化纯 ID */
+  function openTarget() {
+    const a = state.targetEl && state.targetEl.querySelector('a[href^="/images/"]');
+    location.assign(a ? a.getAttribute('href') : '/images/' + state.targetId);
+    LOG('D 进入详情 #' + state.targetId);
+  }
 
   async function runHotkey(ctx, withBack) {
     if (state.busy || !ctx.id) return;
@@ -489,6 +508,21 @@
     alert('[Derpi Triple Shot 自检 v' + ver + ']\n\n' + lines.join('\n'));
   }
 
+  /* 0.2.1 延时设置菜单项：输入即存（毫秒），留空恢复默认随机区间；无需改代码、无需重装 */
+  function setBackDelayMenu() {
+    const cur = GM_getValue('backDelayMs', null);
+    const v = window.prompt(
+      '三连/按 F 后自动返回前的等待毫秒数。\n0 = 立即返回；留空 = 恢复默认（配置区 autoBackDelayMs 区间随机）。\n当前：' +
+      (typeof cur === 'number' ? cur + 'ms（固定）' : '默认区间'),
+      typeof cur === 'number' ? String(cur) : '');
+    if (v === null) return;                    // 取消
+    if (v.trim() === '') { GM_setValue('backDelayMs', null); toast('已恢复默认返回延时'); return; }
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < 0 || n > 60000) { toast('无效数值（应为 0–60000 毫秒）'); return; }
+    GM_setValue('backDelayMs', n);
+    toast('返回延时已设为 ' + n + 'ms，立即生效');
+  }
+
   /* ---------------- 样式 ---------------- */
 
   const _addStyle = typeof GM_addStyle === 'function'
@@ -529,6 +563,7 @@
     setFace('idle');
     if (typeof GM_registerMenuCommand === 'function') {
       GM_registerMenuCommand('▶️ 自检当前页面', runSelfTest);
+      GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
