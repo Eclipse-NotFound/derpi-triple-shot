@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.7
+// @version      0.2.8
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -14,12 +14,14 @@
 // @grant        GM_setClipboard
 // @connect      derpibooru.org
 // @connect      derpicdn.net
-// @run-at       document-idle
+// @run-at       document-start
 // @noframes
 // @license      MIT
 // ==/UserScript==
 
 /*
+ * 里程碑备注（0.2.8 = 键盘早挂修复（数据确诊）：F/E 被站方快捷键处理器先注册吞掉（D 未绑所以通）；
+ *              keydown 前移到 document-start + window 捕获期，先于站方脚本绑定，F/E/D 从根上赢回）：
  * 里程碑备注（0.2.7 = E 键无反应自查探针：加载日志带版本号（一眼区分"旧版未装到位"）+
  *              hotkey 被输入框吞掉时留痕 + 复用版本助手；E 键链路经 grep 自检无码病）：
  * 里程碑备注（0.2.6 = 取证通道修复：日志一键复制成文字（GM_setClipboard）+「被 busy 挡下」可见 +
@@ -98,6 +100,40 @@
     GM_setClipboard(data);
     toast('活动日志已复制，直接在对话里 Ctrl+V 粘贴即可');
   }
+
+  /* ==================== 0.2.8 键盘早挂（document-start + window 捕获期） ====================
+   * 病灶：站方快捷键处理器先于我们注册，吞掉 F/E（document 监听收不到）；D 站方未绑所以能通。
+   * 修法：本监听在 document-start 挂到 window 捕获期——先于站方脚本绑定，F/E/D 从根上赢回。
+   * 人不可能在页面加载完成前按键，booted 置位前的按键一律忽略。 */
+  let booted = false;
+  window.addEventListener('keydown', (e) => {
+    if (!booted) return;
+    if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    const key = (e.key || '').toLowerCase();
+    const isF = key === CONFIG.hotkey;
+    const isD = key === CONFIG.navHotkey;
+    const isE = key === CONFIG.pageHotkey;
+    if (!isF && !isD && !isE) return;
+    if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
+    const kind = pageKind();
+    if (kind === 'grid' && !state.targetId) {
+      const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
+      if (c) setTargetFromEl(c);
+    }
+    J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
+    if (isE) {
+      if (kind === 'grid') gotoRelPage(+1);
+      else J('E 仅作用于搜索/网格页');
+    } else if (isF) {
+      if (kind === 'detail') runHotkey(detailContext(), true);
+      else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false);
+      else J('F 无目标，只余站方原生收藏');
+    } else {
+      if (kind === 'detail') goBackNow();
+      else if (kind === 'grid' && state.targetId) openTarget();
+      else J('D 未命中（非详情页或无目标）');
+    }
+  }, true);
 
   /* 选择器——2026-09-07 已按真实页面 fixtures 收口（实测✓） */
   const SEL = {
@@ -502,34 +538,7 @@
     return { id: state.targetId, csrf: getCsrf(), downloadUrl: null, viewUrl };
   }
 
-  document.addEventListener('keydown', (e) => {
-    if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
-    const key = (e.key || '').toLowerCase();
-    const isF = key === CONFIG.hotkey;
-    const isD = key === CONFIG.navHotkey;
-    const isE = key === CONFIG.pageHotkey;
-    if (!isF && !isD && !isE) return;
-    if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
-    const kind = pageKind();
-    if (kind === 'grid' && !state.targetId) {
-      // 悬停追踪万一滞后：按键事件目标本身在缩略图上则现场锁定（0.2.3 兜底）
-      const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
-      if (c) setTargetFromEl(c);
-    }
-    J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
-    if (isE) {
-      if (kind === 'grid') gotoRelPage(+1);                     // 搜索/标签页：翻到下一页
-      else J('E 仅作用于搜索/网格页');
-    } else if (isF) {
-      if (kind === 'detail') runHotkey(detailContext(), true);   // 详情页：补下载 + 自动返回
-      else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false); // 网格：补下载（收藏交给站方自己的 F）
-      else J('F 无目标，只余站方原生收藏');
-    } else {
-      if (kind === 'detail') goBackNow();                        // 详情页 D：直接返回上一页
-      else if (kind === 'grid' && state.targetId) openTarget();  // 网格 D：当前标签页进入悬停图的详情页
-      else J('D 未命中（非详情页或无目标）');
-    }
-  }, true);  // 捕获期：先于站方快捷键处理器，杜绝被抢听/停传播吞掉
+  /* keydown 监听已前移到 IIFE 顶部（0.2.8：window 捕获期 + document-start 早挂，先于站方） */
 
   /* 网格 D：优先用缩略图自己的链接（保留 ?q= 浏览上下文），退化纯 ID */
   function openTarget() {
@@ -674,7 +683,12 @@
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     LOG('就绪，页面类型：', pageKind());
+    booted = true;   // 0.2.8：初始化完成后，开放 document-start 早挂的键盘监听
   }
 
-  main();
+  function boot() {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main);
+    else main();
+  }
+  boot();
 })();
