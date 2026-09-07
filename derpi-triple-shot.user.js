@@ -1,69 +1,33 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.2.16
-// @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
+// @version      1.0.0
+// @description  一键 收藏+点赞+下载（derpibooru）：F/D/E 快捷键 + 浮动按钮。收藏走站内原生（自带点赞、重复点无害），按站内原版文件名下载原图到 下载/derpi/。
 // @author       you
 // @match        https://derpibooru.org/*
 // @grant        GM_addStyle
 // @grant        GM_download
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
-// @grant        GM_setClipboard
-// @connect      derpibooru.org
-// @connect      derpicdn.net
 // @run-at       document-start
 // @noframes
 // @license      MIT
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.2.16 = 手势重排（用户拍板 B）：左键=三连（详情/网格统一）；详情页右键=返回、网格右键无动作）：
- * 里程碑备注（0.2.15 = ①恢复详情页右键=三连（用户要求；网格右键仍无动作）；②W 去屏蔽整套暂时摘除
- *              （用户拍板：仍不工作，待后续开发；git 历史 0.2.9–0.2.14 保留完整实现与开关））：
- * 里程碑备注（0.2.14 = 反馈修复（数据确诊 v0.2.13 已装对）：①去屏蔽开关点击改弹窗反馈（原浮条太轻易漏）；
- *              ②W"放行"路径加浮条说明（未屏蔽/开关关时按 W 有明确反馈，不再像坏了））：
- * 里程碑备注（0.2.13 = 收拢下载入口：Q 三连摘除（Q 也触发下载，与 F 重复，用户不满）→ 下载仅 F 触发；
- *              详情页右键 = D 键行为（返回上一页），右键回归纯导航）：
- * 里程碑备注（0.2.12 = W 无反应排查：匹配必留痕，零日志=未匹配→嫌疑旧版键位仍是 R。对策：加载日志烙
- *              完整键位表（F/D/E/Q/去屏蔽）；未匹配的单字母按键留痕；日志文案改随配置显示）：
- * 里程碑备注（0.2.11 = 右键审计修复 + Q 键三连：审计确认 0.2.10 右键不再触发左键/三连路径，
- *              唯一漏网是右键拖拽仍会移动按钮（拖动不辨按键）→ 仅左键参与拖动判定，右键/中键全惰性；
- *              原右键按钮的三连程序（onClickButton）整体移植到 Q 键，触发方式外零改动）：
- * 里程碑备注（0.2.10 = ①R 撞站方 r=随机 → 去屏蔽键改 W；②右键按钮不再触发三连（用户：右键仍额外下载，
- *              详情页右击本按 0.1.9 设定即三连，现 F 已是主三连，右击改无动作，杜绝多余下载）：
- * 里程碑备注（0.2.9 = R 键去除详情页屏蔽：程序化点击站内 a[data-click-unfilter]（同 F 走原生思路）；
- *              仅在"解除链接在且大图未载入"时接管，并阻断站方 r=随机图；含菜单「🎚 R键去屏蔽开关」：
- * 里程碑备注（0.2.8 = 键盘早挂修复（数据确诊）：F/E 被站方快捷键处理器先注册吞掉（D 未绑所以通）；
- *              keydown 前移到 document-start + window 捕获期，先于站方脚本绑定，F/E/D 从根上赢回）：
- * 里程碑备注（0.2.7 = E 键无反应自查探针：加载日志带版本号（一眼区分"旧版未装到位"）+
- *              hotkey 被输入框吞掉时留痕 + 复用版本助手；E 键链路经 grep 自检无码病）：
- * 里程碑备注（0.2.6 = 取证通道修复：日志一键复制成文字（GM_setClipboard）+「被 busy 挡下」可见 +
- *              自检报告按钮实例数（>1 = 装了两份脚本，双下载的直接嫌疑））：
- * 里程碑备注（0.2.5 = E 键翻页（用户需求：从前一页切到后一页；沿用站内 a.js-next，fixtures 已实证
- *              62→63→64 结构）；另提醒：菜单缺「清空活动日志」= 装的是 ≤0.2.3，0.2.4 双下载修复未生效）：
- * 里程碑备注（0.2.4 = 双下载隐患修复：文件名限长 150（带标签版可达 220+ 字符，路径超长触发
- *              子目录失败→平铺重试，制造双下载）；dispatchDownload 改单次尝试不自动重试；
- *              活动日志 40→250 条 + 「🧹 清空活动日志」菜单，供复现取证）：
- * 里程碑备注（0.2.3 = 全手势活动日志（GM 存储环形 40 条，菜单「📋 活动日志」可读）+ 键盘改捕获期监听 +
- *              网格 D 现场锁定兜底；目标：用数据揪出"详情页左键仍触发下载"与"网格 D 无反应"两症）：
- * 里程碑备注（0.2.2 = 左键返回竞态修复：返回前 backNow 先锁按钮+作废在途流程，30ms 后离场；
- *             pageshow 钩子清掉 BFCache 恢复页残留的锁定目标，杜绝返回瞬间合成点击"补刀"下载）：
- * 里程碑备注（0.2.1 = D 键导航环（网格→详情→返回）+ 自动返回延时菜单可调（存脚本存储，立即生效））：
- *  0.2.0 键盘三连：F 键纯搭载——收藏+点赞走站内原生处理器（星星实时点亮），
- *              插件对同一次按键只补发下载（详情页再加自动返回）；网格/详情通用，⚡ 按钮退役为鼠标备用。
- *              护栏：输入框/编辑器焦点、Ctrl/Alt/Meta/Shift 修饰键、按键连发(e.repeat)一律不触发；未登录拒发并提示。
- *  0.1.9 手势重排：详情页左键=直接返回、右键=三连；网格左键=三连。
- *  0.1.7 dispatch 发出即走：收藏+下载请求发车即返回，不等任何回包；
- *  - 已知代价（用户拍板接受的）：返回会把页面冻进缓存，收藏结果无人回读——失败静默。
- *  - 对策：发出前预检登录态（页头有退出登录链接=已登录）；未登录直接拒发并红字提示。
- *  - 下载走 chrome.downloads（浏览器进程），页面冻结不影响传输，发出即安全。
- *  - 想退回"等收藏回包再走"：triShotTiming 改回 'stagger' 一行字。
- *  （0.1.6 时序存档+动态版本标题；0.1.5 三时序开关+时间戳；0.1.4 并行；0.1.2 fixtures 收口修 403：
- *    收藏按钮是 href="#" 假链接，一律 POST /images/<id>/fave + 表单参数 _csrf_token + 头双保险；
- *    下载直链=详情页 a[href*="/img/download/"] 首枚 / 网格 data-uris 的 view→download 替换。）
+ * Derpi Triple Shot v1.0.0（发布版）
+ *
+ * 键位：F = 三连（站内原生收藏+点赞，插件补下载；详情页完成后自动返回）
+ *       D = 网格：进入悬停图详情页；详情：返回上一页
+ *       E = 网格：翻到下一页
+ * 按钮：左键 = 三连（详情/网格统一）；详情页右键 = 返回；可拖动、位置记忆
+ * 菜单：⏱ 设置自动返回延时（持久化）｜🎯 重置按钮位置
+ * 下载：浏览器默认下载目录/derpi/，站内原版文件名（超长自动截断）
+ * 默认 dispatch 模式：收藏+下载请求发出即走，不等回包（详情页约 0.3–0.6 秒后自动返回）
+ *
+ * 调试仪器（活动日志/自检/时间戳）已从发布版移除；
+ * 实现细节、选型依据与排障方法见 docs/方案定稿.md 与 git 历史。
  */
 
 (function () {
@@ -71,56 +35,18 @@
 
   /* ===================== 配置区（改这里即可） ===================== */
   const CONFIG = {
-    downloadSubfolder: 'derpi',      // 存到浏览器默认下载目录下的子文件夹；'' = 直接存下载根目录
-    autoBack:          true,         // 详情页三连成功后自动回上一页（搜索页）
-    autoBackDelayMs:   [300, 600],  // 返回前停顿（dispatch 模式回包不等，这段纯为让你瞄一眼提示）；真·秒回写 [0, 0]
-    buttonDefault:     { xPct: 96, yPct: 40 }, // 首次出现位置（视口百分比）；拖动后自动记忆
-    triShotTiming:     'dispatch',  // 三连时序：'dispatch' 发出即走（默认，激进）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
-    hotkey:            'f',         // 0.2.0 键盘三连：站内原生收藏/点赞 + 插件补下载（详情页附自动返回）；撞了就改这一个字
-    navHotkey:         'd',         // 0.2.1 导航键：网格按 D=进当前悬停图的详情页；详情页按 D=返回上一页
-    pageHotkey:        'e',         // 0.2.5 翻页键：搜索/标签页按 E=翻到下一页（走站内 Next 链接）
-    staggerMs:         300,         // 下载比收藏晚发车的毫秒数（dispatch/stagger 通用：给收藏留出带宽头筹）
-    debug:             true,         // 控制台 [DTS] 日志
+    downloadSubfolder: 'derpi',      // 下载子目录；'' = 直接存下载根目录
+    autoBack:          true,         // 详情页三连成功后自动回上一页
+    autoBackDelayMs:   [300, 600],  // 返回前停顿区间（毫秒）；菜单可设固定值；真·秒回写 [0, 0]
+    buttonDefault:     { xPct: 96, yPct: 40 }, // 按钮首次位置（视口百分比）；拖动后自动记忆
+    triShotTiming:     'dispatch',  // 'dispatch' 发出即走（默认）| 'stagger' 错峰 | 'parallel' 并行 | 'serial' 串行
+    hotkey:            'f',         // 三连键
+    navHotkey:         'd',         // 导航键
+    pageHotkey:        'e',         // 翻页键
+    staggerMs:         300,         // 收藏先发车、下载晚 staggerMs 毫秒（错峰用）
   };
-  /* ===================== 配置区结束 ===================== */
 
-  const LOG = (...a) => { if (CONFIG.debug) console.log('[DTS]', ...a); };
-
-  /* 0.2.7：版本助手（日志/自检共用，兼作"到底装的是哪版"的铁证） */
-  function scriptVer() {
-    return (typeof GM_info === 'object' && GM_info.script) ? GM_info.script.version : '?';
-  }
-
-  /* 0.2.3 活动日志：环形 250 条、每条落 GM 存储（跨页面保留）；菜单「📋 活动日志」读出 */
-  const journal = [];
-  function J(msg) {
-    const line = new Date().toTimeString().slice(0, 8) + ' ' + msg;
-    journal.push(line);
-    if (journal.length > 250) journal.shift();
-    if (typeof GM_setValue === 'function') GM_setValue('journal', journal.join('\n'));
-    if (CONFIG.debug) console.log('[DTS·J]', msg);
-  }
-  function showJournal() {
-    const data = (typeof GM_getValue === 'function') ? GM_getValue('journal', '') : '';
-    alert('[活动日志（最近 250 条）]\n\n' + (data || '（空——请先复现一次问题）'));
-  }
-  function clearJournal() {
-    journal.length = 0;
-    if (typeof GM_setValue === 'function') GM_setValue('journal', '');
-    toast('活动日志已清空');
-  }
-  /* 0.2.6：日志一键复制为文字（alert 内容无法选中复制，改走剪贴板） */
-  function copyJournal() {
-    const data = (typeof GM_getValue === 'function') ? GM_getValue('journal', '') : '';
-    if (typeof GM_setClipboard !== 'function') { toast('GM_setClipboard 不可用'); return; }
-    GM_setClipboard(data);
-    toast('活动日志已复制，直接在对话里 Ctrl+V 粘贴即可');
-  }
-
-  /* ==================== 0.2.8 键盘早挂（document-start + window 捕获期） ====================
-   * 病灶：站方快捷键处理器先于我们注册，吞掉 F/E（document 监听收不到）；D 站方未绑所以能通。
-   * 修法：本监听在 document-start 挂到 window 捕获期——先于站方脚本绑定，F/E/D 从根上赢回。
-   * 人不可能在页面加载完成前按键，booted 置位前的按键一律忽略。 */
+  /* 键盘监听在 document-start 挂到 window 捕获期——先于站方快捷键处理器（站方会抢 F/E，见 git 历史 0.2.8） */
   let booted = false;
   window.addEventListener('keydown', (e) => {
     if (!booted) return;
@@ -129,45 +55,34 @@
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
-    if (!isF && !isD && !isE) {
-      // 0.2.12：未匹配的单字母按键留痕（定位"某键无反应"是没装对/键位不符/事件未达）；输入区内不打
-      if (key.length === 1 && !isTextTarget(e.target)) {
-        J(`key ${key.toUpperCase()} 未匹配（键位 F/D/E）`);
-      }
-      return;
-    }
-    if (isTextTarget(e.target)) { J(`hotkey ${key.toUpperCase()} 被输入框/编辑器吞掉（焦点在输入区，符合预期）`); return; }
+    if (!isF && !isD && !isE) return;
+    if (isTextTarget(e.target)) return;                    // 搜索框/编辑器打字不触发
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
       const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
-      if (c) setTargetFromEl(c);
+      if (c) setTargetFromEl(c);                            // 悬停追踪滞后时现场锁定
     }
-    J(`key ${key.toUpperCase()} kind=${kind} target=${state.targetId || '∅'}`);
     if (isE) {
       if (kind === 'grid') gotoRelPage(+1);
-      else J('E 仅作用于搜索/网格页');
-    } else if (isF) {
+    } else if (isF) {                                      // F：站内原生收藏/点赞 + 插件补下载
       if (kind === 'detail') runHotkey(detailContext(), true);
       else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false);
-      else J('F 无目标，只余站方原生收藏');
-    } else {
+    } else {                                               // D
       if (kind === 'detail') goBackNow();
       else if (kind === 'grid' && state.targetId) openTarget();
-      else J('D 未命中（非详情页或无目标）');
     }
   }, true);
 
-  /* 选择器——2026-09-07 已按真实页面 fixtures 收口（实测✓） */
+  /* 选择器——已按真实页面 fixtures 收口（实测✓） */
   const SEL = {
     csrf:          ['meta[name="csrf-token"]', 'meta[name="csrf"]'],
     detailImage:   ['div.image-show-container[data-image-id]', 'div.image-container[data-image-id]'],
     imageIdAttr:   'data-image-id',
-    // 详情页有两枚下载链：首枚=带标签文件名版（站内“下载”主按钮同款），次枚=纯 ID 版
+    // 详情页两枚下载链：首枚=带标签文件名版（站内“下载”主按钮同款），次枚=纯 ID 版
     downloadLink:  'a[href*="/img/download/"]',
-    urisAttr:      'data-uris', // 网格缩略图容器上的 JSON：{"full":"…/img/view/…png",…}
+    urisAttr:      'data-uris', // 网格缩略图容器 JSON：{"full":"…/img/view/…png",…}
     thumbImage:    'div.image-container[data-image-id]',
   };
-
   const first = (list) => {
     for (const s of list) { const el = document.querySelector(s); if (el) return el; }
     return null;
@@ -178,14 +93,13 @@
     targetEl: null,   // 网格页当前目标缩略图元素
     targetId: null,   // 其图片 ID
     busy: false,
-    token: 0,         // 0.2.2 竞态护栏：每次「先停手再返回」+1，在途流程回写状态前核对，作废即弃
+    token: 0,         // 竞态护栏：返回前作废一切在途流程的迟到回写
   };
 
   /* ---------------- 页面判定与信息提取 ---------------- */
 
   function pageKind() {
-    // 详情页以 URL 为准：/images/<id> 路径是可靠信号，query 串任意（0.1.1 修复）
-    if (/\/images\/\d+/.test(location.pathname)) return 'detail';
+    if (/\/images\/\d+/.test(location.pathname)) return 'detail';   // URL 权威，query 任意
     if (document.querySelector(SEL.thumbImage)) return 'grid';
     return 'other';
   }
@@ -206,8 +120,8 @@
 
   /* ---------------- 收藏（自带点赞） ---------------- */
 
-  /* fixtures 实证：站内收藏按钮是 href="#" 的假链接，提交地址一律按站内路由构造；
-   * 暗号按站内 form 惯例走表单参数 _csrf_token，另带 X-CSRF-Token 头双保险。 */
+  /* fixtures 实证：站内收藏按钮是 href="#" 假链接；提交地址按站内路由构造，
+   * 暗号走表单参数 _csrf_token（站内 form 惯例）+ X-CSRF-Token 头双保险。 */
   async function postFave(ctx) {
     if (!ctx.csrf) throw new Error('页面里找不到防伪暗号(CSRF)');
     const r = await fetch(`/images/${ctx.id}/fave`, {
@@ -225,9 +139,7 @@
       throw new Error('未登录——请先登录 derpibooru 再用三连');
     }
     const ct = r.headers.get('content-type') || '';
-    if (!r.ok || !ct.includes('json')) {
-      throw new Error(`站内返回 ${r.status}（${ct || '未知类型'}）——刷新页面重试；仍失败请用「▶️ 自检当前页面」回报`);
-    }
+    if (!r.ok || !ct.includes('json')) throw new Error(`站内返回 ${r.status}（${ct || '未知类型'}）——刷新页面重试`);
     return r.json(); // { score, faves, upvotes, downvotes }
   }
 
@@ -248,7 +160,7 @@
     let name = seg;
     try { name = decodeURIComponent(seg.replace(/\+/g, ' ')); } catch (e) { /* 保留原样 */ }
     if (!/\.\w{2,5}$/.test(name)) name += '.png';
-    // 0.2.4：截断超长文件名（带标签版可达 220+ 字符），避免路径超长触发“失败→重试”的双下载
+    // 截断超长文件名（带标签版可达 220+ 字符），避免路径超长导致下载失败
     if (name.length > 150) {
       const m = name.match(/\.\w{2,5}$/);
       name = name.slice(0, 150 - (m ? m[0].length : 0)) + (m ? m[0] : '');
@@ -256,8 +168,7 @@
     return name;
   }
 
-  /* 下载直链优先级：详情页站内下载链（带标签文件名版）→ 网格 data-uris 的 view→download 替换
-   * （fixtures 实证成立）→ JSON API representations.full 兜底。 */
+  /* 下载直链优先级：详情页站内下载链（带标签文件名版）→ 网格 data-uris 的 view→download 替换 → JSON API 兜底 */
   async function resolveDownload(ctx) {
     let url = ctx.downloadUrl;
     if (!url && ctx.viewUrl) url = ctx.viewUrl.replace('/img/view/', '/img/download/');
@@ -266,9 +177,9 @@
         const img = await fetchImageJson(ctx.id);
         const full = img && img.representations && img.representations.full;
         if (full) url = full.replace('/img/view/', '/img/download/');
-      } catch (e) { LOG('取图片 JSON 失败：', e.message); }
+      } catch (e) { /* 走下一步兜底 */ }
     }
-    if (!url) throw new Error('找不到下载直链（请用「▶️ 自检当前页面」回报）');
+    if (!url) throw new Error('找不到下载直链');
     return { url, name: filenameFromUrl(url, ctx.id) };
   }
 
@@ -284,15 +195,12 @@
     });
   }
 
-  /* dispatch 模式专用：下载入队即算数——chrome.downloads 在浏览器进程传输，
-   * 页面冻结死不掉的；但 URL 解析必须先完成（罕见兜底路径可能多花一二百毫秒）。 */
+  /* dispatch 专用：下载入队即算数——chrome.downloads 在浏览器进程传输，页面冻结不影响 */
   async function dispatchDownload(ctx) {
     if (typeof GM_download !== 'function') throw new Error('GM_download 不可用——检查「允许用户脚本」开关');
     const { url, name } = await resolveDownload(ctx);
     const target = (CONFIG.downloadSubfolder ? CONFIG.downloadSubfolder + '/' : '') + name;
-    J('下载发车 #' + ctx.id + ' → ' + target.slice(0, 48));
-    // 0.2.4：单次尝试，不再自动重试（重试=双下载）；文件名已在上游限长
-    gmDownload(url, target).catch((e) => { J('下载失败（不重试）：' + e.message); });
+    gmDownload(url, target).catch(() => {});   // 单次尝试不重试（重试=双下载）；失败由浏览器下载栏呈现
     return { name: target };
   }
 
@@ -303,8 +211,7 @@
       await gmDownload(url, target);
       return { name: target };
     } catch (e) {
-      LOG('子目录下载失败，退化平铺：', e.message);
-      const flat = 'derpi_' + name;
+      const flat = 'derpi_' + name;              // 子目录不可用时退化平铺
       await gmDownload(url, flat);
       return { name: flat, degraded: true };
     }
@@ -312,15 +219,11 @@
 
   /* ---------------- 三连主流程 ---------------- */
 
-  /* 三连时序：dispatch=发出即走（默认，用户拍板的激进模式）；stagger=错峰（收藏先发车）；
-   * parallel=同时发车等两路结果；serial=串行等结果。dispatch 的代价：页面返回即冻结，
-   * 收藏回包无人读——失败静默，用发出前登录预检堵住最大的坑。 */
+  /* dispatch=发出即走（默认）。代价：页面返回即冻结，收藏回包无人回读——失败静默，
+   * 用发出前登录预检堵住最大的坑；下载走 chrome.downloads，页面冻结不影响。 */
   async function triShot(ctx) {
     if (!ctx.id) throw new Error('找不到图片 ID');
     const mode = CONFIG.triShotTiming;
-    const t0 = performance.now();
-    const marks = { 点击: 0 };
-    const rec = (label) => { marks[label] = Math.round(performance.now() - t0); };
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e }));
 
@@ -328,41 +231,26 @@
       if (!document.querySelector('a[href="/sessions"][data-method="delete"]')) {
         throw new Error('未登录——dispatch 模式无法事后报告，已拒绝发出（请先登录，或把 triShotTiming 改回 stagger）');
       }
-      postFave(ctx).catch((e) => LOG('收藏结果（页面冻结后不可见）：', e.message)); // 发出即结案
-      rec('收藏发出');
-      await wait(CONFIG.staggerMs); // 给收藏请求留出带宽头筹（staggerMs 同样作用于 dispatch）
+      postFave(ctx).catch(() => {});   // 发出即结案（页面冻结后回包不回读）
+      await wait(CONFIG.staggerMs);    // 给收藏请求留出带宽头筹
       let dl;
       try { dl = await dispatchDownload(ctx); } catch (e) { throw new Error('下载未发出：' + e.message); }
-      rec('下载发车');
-      const line = `时序=dispatch #${ctx.id} ${JSON.stringify(marks)}（回包不回读）`;
-      console.log('[DTS·T] ' + line);
-      if (typeof GM_setValue === 'function') GM_setValue('lastTiming', line);
       return { inter: null, dl, dispatched: true };
     }
 
-    const faveP = settle((async () => { rec('收藏发出'); const r = await postFave(ctx); rec('收藏回包'); return r; })());
+    const faveP = settle(postFave(ctx).then((r) => r));
     const dlP = settle((async () => {
       if (mode === 'stagger') await wait(CONFIG.staggerMs);
       else if (mode === 'serial') await faveP;
-      rec('下载发车');
-      const r = await downloadImage(ctx);
-      rec('下载完成');
-      return r;
+      return downloadImage(ctx);
     })());
-
     const [f, d] = await Promise.all([faveP, dlP]);
     const errs = [];
     if (!f.ok) errs.push('收藏/点赞：' + f.e.message);
     if (!d.ok) errs.push('下载：' + d.e.message);
-    const timing = `时序=${CONFIG.triShotTiming} #${ctx.id} ${JSON.stringify(marks)}` +
-      (errs.length ? ' 失败：' + errs.join('；') : '');
-    console.log('[DTS·T] ' + timing);
-    if (typeof GM_setValue === 'function') GM_setValue('lastTiming', timing); // 自动返回会清控制台，存档留证
     if (errs.length) throw new Error(errs.join('；') + '｜另一路已完成');
     return { inter: f.v, dl: d.v };
   }
-
-  /* 自动返回统一入口在浮动按钮区（backNow/scheduleAutoBack，0.2.2 带竞态护栏），此处旧版已除 */
 
   /* ---------------- 浮动按钮 UI ---------------- */
 
@@ -396,7 +284,7 @@
   function attachDragAndClick() {
     let down = null, dragged = false;
     btn.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;   // 0.2.11 审计修复：仅左键参与拖动/点击判定，右键/中键完全惰性
+      if (e.button !== 0) return;   // 仅左键参与拖动/点击判定，右键/中键完全惰性
       down = { x: e.clientX, y: e.clientY, bx: btn.offsetLeft, by: btn.offsetTop, button: e.button };
       dragged = false;
       btn.setPointerCapture(e.pointerId);
@@ -411,29 +299,25 @@
       }
     });
     btn.addEventListener('pointerup', (e) => {
-      if (down && dragged) { GM_setValue('btnPos', { x: btn.offsetLeft, y: btn.offsetTop }); J('按钮拖动并松手'); }
-      else if (down && e.button === 0) { J('按钮左键点起'); onLeftClick(); }   // 右键走 contextmenu，不在这里触发
+      if (down && dragged) GM_setValue('btnPos', { x: btn.offsetLeft, y: btn.offsetTop });
+      else if (down && e.button === 0) onLeftClick();   // 右键走 contextmenu，不在这里触发
       down = null;
     });
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();                                  // 按钮上压掉浏览器右键菜单
-      // 0.2.16（用户拍板 B）：详情页右键 = 返回；网格右键仍无动作
-      if (pageKind() === 'detail') { J('按钮右键（→返回）'); goBackNow(); }
-      else J('按钮右键（非详情页无动作）');
+      if (pageKind() === 'detail') goBackNow();            // 详情页右键=返回；网格右键无动作
     });
   }
 
-  /* 0.2.16 手势（用户拍板 B）：左键=三连（详情/网格统一）；右键=详情页返回、网格无动作 */
+  /* 左键=三连（详情/网格统一） */
   function onLeftClick() {
-    if (state.busy) { J('左键被 busy 挡下'); return; }
+    if (state.busy) return;
     onClickButton();
   }
 
-  /* 0.2.2 竞态修复：返回前先停手——作废一切在途流程、按钮上锁，30ms 后再走。
-   * 病灶：返回瞬间详情页冻结进缓存，半路的下载流程回调在解冻边界继续执行，
-   * 造成“左键返回顺带触发下载”。 */
+  /* 返回护栏：先作废在途流程、锁按钮，30ms 后离场——防止页面冻结进缓存后，
+   * 半路流程的回调在解冻边界继续执行（曾造成“返回顺带下载”） */
   function backNow(quiet) {
-    J('backNow（quiet=' + quiet + '）');
     const ref = document.referrer || '';
     if (!ref.includes(location.hostname)) {
       if (!quiet) toast('本页没有站内来路，不返回（新标签可手动关）');
@@ -444,7 +328,6 @@
     clearTimeout(resetTimer);
     if (btn) setFace('busy');
     setTimeout(() => {
-      J('backNow 30ms 后离场');
       if (history.length > 1) history.back();
       else window.close();
     }, 30);
@@ -456,19 +339,17 @@
     if (!CONFIG.autoBack) return;
     const ref = document.referrer || '';
     if (!ref.includes(location.hostname)) { toast('已完成（无站内来路，不自动返回）'); return; }
-    // 0.2.1：菜单设置的固定延时优先（存脚本存储，跨更新保留）；未设置则用配置区默认区间随机
+    // 菜单设置的固定延时优先（存脚本存储）；未设置则用配置区间随机
     const fixed = (typeof GM_getValue === 'function') ? GM_getValue('backDelayMs', null) : null;
     const [a, b] = (typeof fixed === 'number' && Number.isFinite(fixed)) ? [fixed, fixed] : CONFIG.autoBackDelayMs;
     const delay = Math.round(a + Math.random() * Math.max(0, b - a));
     const token = state.token;
-    J('排定自动返回 ' + delay + 'ms（token=' + token + '）');
     setTimeout(() => { if (token === state.token) backNow(true); }, delay);
   }
 
   async function onClickButton() {
-    if (state.busy) { J('按钮三连被 busy 挡下'); return; }
+    if (state.busy) return;
     const kind = pageKind();
-    J('按钮三连 kind=' + kind + ' target=' + (state.targetId || '∅'));
     let ctx;
     if (kind === 'detail') {
       ctx = detailContext();
@@ -486,17 +367,14 @@
       setFace('ok');
       if (res.dispatched) {
         toast(`三连已发出 #${ctx.id} ✓（不等回包，即将返回）`);
-        LOG('已发出：', ctx.id, res.dl.name);
       } else {
         const i = res.inter || {};
         toast(`三连成功 #${ctx.id} ✓（服务器回包：收藏 ${i.faves ?? '?'}，得分 ${i.score ?? '?'}）`);
-        LOG('成功：', ctx.id, res.inter, res.dl.name);
       }
       if (kind === 'detail') scheduleAutoBack();
     } catch (e) {
       setFace('fail');
       toast('三连失败：' + e.message);
-      LOG('失败：', e);
     } finally {
       state.busy = false;
       clearTimeout(resetTimer);
@@ -528,7 +406,6 @@
     state.targetId = c.getAttribute(SEL.imageIdAttr);
     c.classList.add('dts-target');
     if (face) face.textContent = '⚡';
-    J('锁定目标 #' + state.targetId);
   }
 
   document.addEventListener('mouseover', (e) => {
@@ -536,20 +413,17 @@
     setTargetFromEl(e.target.closest('div.image-container[data-image-id]'));
   });
 
-  /* 0.2.2 BFCache 恢复清理：返回进缓存的页面再解冻时，清掉冻结前残留的锁定目标与忙态——
-   * 否则返回瞬间浏览器合成的第二次点击会落在旧目标上，造成"左键返回顺带下载"。 */
+  /* BFCache 恢复清理：清掉冻结前残留的锁定目标与忙态，避免返回瞬间合成点击落在旧目标上 */
   window.addEventListener('pageshow', (e) => {
-    J('pageshow persisted=' + e.persisted);
-    if (!e.persisted) return;                 // 只处理从缓存恢复（back/forward 解冻），首次加载不清理
+    if (!e.persisted) return;                 // 只处理从缓存恢复（back/forward 解冻）
     state.targetEl = null;
     state.targetId = null;
     state.busy = false;
     state.token++;
     if (btn) setFace('idle');
-    LOG('BFCache 恢复，已清理残留目标/忙态');
   });
 
-  /* ---------------- 0.2.0 键盘三连：F=站内原生收藏/点赞，本插件对同一按键补发下载（详情页附返回） ---------------- */
+  /* ---------------- 键盘三连：F=站内原生收藏/点赞，本插件补下载（详情页附返回） ---------------- */
 
   function isTextTarget(t) {
     return !!(t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]'));
@@ -561,50 +435,35 @@
     return { id: state.targetId, csrf: getCsrf(), downloadUrl: null, viewUrl };
   }
 
-  /* keydown 监听已前移到 IIFE 顶部（0.2.8：window 捕获期 + document-start 早挂，先于站方） */
-
   /* 网格 D：优先用缩略图自己的链接（保留 ?q= 浏览上下文），退化纯 ID */
   function openTarget() {
     const a = state.targetEl && state.targetEl.querySelector('a[href^="/images/"]');
     location.assign(a ? a.getAttribute('href') : '/images/' + state.targetId);
-    LOG('D 进入详情 #' + state.targetId);
   }
 
-  /* E 键：搜索/标签页翻到下一页（0.2.5；沿用站内 a.js-next，js-prev 预留） */
+  /* E 键：搜索/标签页翻到下一页（沿用站内 a.js-next） */
   function gotoRelPage(dir) {
     const a = dir > 0 ? document.querySelector('a.js-next') : document.querySelector('a.js-prev');
     if (!a) { toast(dir > 0 ? '已是最后一页' : '已是第一页'); return; }
-    J('E 翻页 → ' + a.getAttribute('href').slice(0, 70));
     location.assign(a.getAttribute('href'));
   }
 
-  /* 去屏蔽（W 键）已按用户要求暂时摘除（0.2.15，待后续开发）；完整实现见 git 历史 0.2.9–0.2.14 */
-
   async function runHotkey(ctx, withBack) {
-    if (state.busy || !ctx.id) {
-      if (state.busy) J('F 流程被 busy 挡下（若同刻另一路已发车，属正常防重）');
-      return;
-    }
+    if (state.busy || !ctx.id) return;
     if (!document.querySelector('a[href="/sessions"][data-method="delete"]')) {
       toast('未登录——站内原生 F 收藏不会生效，下载已跳过');
       return;
     }
-    J('F 流程开始 #' + ctx.id + ' withBack=' + withBack);
     state.busy = true;
     setFace('busy');
     try {
       await dispatchDownload(ctx);   // 入队即结案；下载由浏览器进程完成，页面返回冻结不影响
       setFace('ok');
       toast(`三连已发出 #${ctx.id} ✓（收藏=站内原生，下载已入队）`);
-      const line = `时序=hotkey #${ctx.id} 下载入队（收藏/点赞=站内F原生）`;
-      console.log('[DTS·T] ' + line);
-      if (typeof GM_setValue === 'function') GM_setValue('lastTiming', line);
       if (withBack) scheduleAutoBack();
     } catch (e) {
-      J('F 流程失败：' + e.message);
       setFace('fail');
       toast('快捷键三连失败：' + e.message);
-      LOG('hotkey:', e);
     } finally {
       state.busy = false;
       clearTimeout(resetTimer);
@@ -612,40 +471,9 @@
     }
   }
 
-  /* ---------------- 自检（Tampermonkey 菜单） ---------------- */
+  /* ---------------- 菜单（用户可调项） ---------------- */
 
-  function runSelfTest() {
-    const kind = pageKind();
-    const csrfEl = first(SEL.csrf);
-    const dls = [...document.querySelectorAll(SEL.downloadLink)].map((a) => a.getAttribute('href'));
-    const fave = document.querySelector('a.interaction--fave');
-    const probeThumb = document.querySelector(SEL.thumbImage);
-    let uriProbe = '';
-    if (probeThumb) {
-      try { uriProbe = JSON.parse(probeThumb.getAttribute(SEL.urisAttr)).full; } catch (e) { uriProbe = '✗ data-uris 解析失败'; }
-    }
-    const thumbs = document.querySelectorAll(SEL.thumbImage).length;
-    const gms = {
-      GM_download: typeof GM_download === 'function',
-      GM_xmlhttpRequest: typeof GM_xmlhttpRequest === 'function',
-    };
-    const lines = [
-      `页面类型: ${kind}（路径 ${location.pathname}）`,
-      `防伪暗号(CSRF): ${csrfEl ? '✓' : '✗ 找不到'}`,
-      `下载直链: ${dls.length ? '✓ ' + dls.length + ' 枚（首枚 ' + dls[0].slice(0, 46) + '…）' : '— 本页无（网格页走 data-uris）'}`,
-      `收藏按钮: ${fave ? '✓ 假链接 href=' + fave.getAttribute('href') + '（提交走 /images/<id>/fave）' : '— 未找到'}`,
-      `缩略图容器: ${thumbs} 个；data-uris 首枚: ${uriProbe || '—'}`,
-      `GM_download: ${gms.GM_download ? '✓' : '✗（开「允许用户脚本」）'}`,
-      `GM_xmlhttpRequest: ${gms.GM_xmlhttpRequest ? '✓' : '✗（开「允许用户脚本」）'}`,
-      `浮动按钮已在页面: ${!!document.getElementById('dts-btn')}`,
-      `按钮实例数（>1 = 装了两份脚本，务必删旧条目）: ${document.querySelectorAll('#dts-btn').length}`,
-      `最近一次三连时序: ${typeof GM_getValue === 'function' ? (GM_getValue('lastTiming', '（从未跑过）')) : '—'}`,
-    ];
-    console.log('[DTS] 自检 ────────\n' + lines.join('\n'));
-    alert('[Derpi Triple Shot 自检 v' + scriptVer() + ']\n\n' + lines.join('\n'));
-  }
-
-  /* 0.2.1 延时设置菜单项：输入即存（毫秒），留空恢复默认随机区间；无需改代码、无需重装 */
+  /* 延时设置：输入即存（毫秒，0-60000），留空恢复默认区间 */
   function setBackDelayMenu() {
     const cur = GM_getValue('backDelayMs', null);
     const v = window.prompt(
@@ -692,25 +520,16 @@
   /* ---------------- 启动 ---------------- */
 
   function main() {
-    J('脚本加载 v' + scriptVer() +
-      ' 键位 F=' + CONFIG.hotkey + ' D=' + CONFIG.navHotkey + ' E=' + CONFIG.pageHotkey +
-      ' kind=' + pageKind());
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
-      console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开（见 README 排障第 1 条）。');
+      console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开。');
     }
-    // 按钮与菜单全页常开（0.1.1）：误判页也要能跑自检，点击时会解释本页不可用
     buildButton();
     setFace('idle');
     if (typeof GM_registerMenuCommand === 'function') {
-      GM_registerMenuCommand('▶️ 自检当前页面', runSelfTest);
       GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
-      GM_registerMenuCommand('📋 活动日志', showJournal);
-      GM_registerMenuCommand('🧹 清空活动日志', clearJournal);
-      GM_registerMenuCommand('📋 复制活动日志', copyJournal);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
-    LOG('就绪，页面类型：', pageKind());
-    booted = true;   // 0.2.8：初始化完成后，开放 document-start 早挂的键盘监听
+    booted = true;   // 初始化完成后开放 document-start 早挂的键盘监听
   }
 
   function boot() {
