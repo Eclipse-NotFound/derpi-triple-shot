@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      0.1.3
+// @version      0.1.4
 // @description  一键 收藏+点赞+下载：浮动按钮、搜索网格目标记忆、成功后自动回搜索页。三连=发一次站内收藏请求（derpibooru 源码已证：收藏自带点赞、重复点无害）+ 按站内原版文件名下载原图。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -19,7 +19,7 @@
 // ==/UserScript==
 
 /*
- * 里程碑备注（0.1.3 = 成功提示显示服务器回传的收藏数/得分，排查“未收藏”疑云）：
+ * 里程碑备注（0.1.4 = 收藏与下载并行：下载不再等收藏回包（站内 fave 含服务端重索引，秒级耗时））：
  *  - 403 病根确诊：站内收藏按钮 a.interaction--fave 是 href="#" 的假链接（JS 动态处理），
  *    0.1.1 拿它当提交地址打到了错误路由。修复：一律 POST /images/<id>/fave，
  *    暗号按站内惯例走表单参数 _csrf_token + X-CSRF-Token 头双保险。
@@ -183,9 +183,17 @@
 
   async function triShot(ctx) {
     if (!ctx.id) throw new Error('找不到图片 ID');
-    const inter = await postFave(ctx);       // 源码已证：收藏自带点赞，重复点无害
-    const dl = await downloadImage(ctx);
-    return { inter, dl };
+    // 并行发起：站内收藏接口含服务端重索引、回包慢（源码实证），不该拖住下载启动。
+    // 两路各自记账（Q8 拍板：三动作独立执行独立记结果），任一失败都如实列出。
+    const [faveRes, dlRes] = await Promise.allSettled([
+      postFave(ctx),      // 收藏（源码已证自带点赞，重复点无害）
+      downloadImage(ctx),
+    ]);
+    const errs = [];
+    if (faveRes.status === 'rejected') errs.push('收藏/点赞：' + faveRes.reason.message);
+    if (dlRes.status === 'rejected') errs.push('下载：' + dlRes.reason.message);
+    if (errs.length) throw new Error(errs.join('；') + '｜另一路已完成');
+    return { inter: faveRes.value, dl: dlRes.value };
   }
 
   /* ---------------- 自动回搜索页 ---------------- */
