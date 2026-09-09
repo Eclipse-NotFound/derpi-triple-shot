@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      1.0.0
+// @version      1.1.0
 // @description  一键 收藏+点赞+下载（derpibooru）：F/D/E 快捷键 + 浮动按钮。收藏走站内原生（自带点赞、重复点无害），按站内原版文件名下载原图到 下载/derpi/。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -21,6 +21,7 @@
  * 键位：F = 三连（站内原生收藏+点赞，插件补下载；详情页完成后自动返回）
  *       D = 网格：进入悬停图详情页；详情：返回上一页
  *       E = 网格：翻到下一页
+ *       W = 尝试关闭当前标签（best-effort：浏览器仅放行脚本弹出的标签，被拒时浮条提示）
  * 按钮：左键 = 三连（详情/网格统一）；详情页右键 = 返回；可拖动、位置记忆
  * 菜单：⏱ 设置自动返回延时（持久化）｜🎯 重置按钮位置
  * 下载：浏览器默认下载目录/derpi/，站内原版文件名（超长自动截断）
@@ -43,6 +44,7 @@
     hotkey:            'f',         // 三连键
     navHotkey:         'd',         // 导航键
     pageHotkey:        'e',         // 翻页键
+    closeHotkey:       'w',         // 关闭当前标签（best-effort：被浏览器拒绝时浮条提示原生快捷键）
     staggerMs:         300,         // 收藏先发车、下载晚 staggerMs 毫秒（错峰用）
   };
 
@@ -55,14 +57,17 @@
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
-    if (!isF && !isD && !isE) return;
+    const isW = key === CONFIG.closeHotkey;
+    if (!isF && !isD && !isE && !isW) return;
     if (isTextTarget(e.target)) return;                    // 搜索框/编辑器打字不触发
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
       const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
       if (c) setTargetFromEl(c);                            // 悬停追踪滞后时现场锁定
     }
-    if (isE) {
+    if (isW) {
+      closeTab();                                           // W：best-effort 关闭当前标签
+    } else if (isE) {
       if (kind === 'grid') gotoRelPage(+1);
     } else if (isF) {                                      // F：站内原生收藏/点赞 + 插件补下载
       if (kind === 'detail') runHotkey(detailContext(), true);
@@ -446,6 +451,15 @@
     const a = dir > 0 ? document.querySelector('a.js-next') : document.querySelector('a.js-prev');
     if (!a) { toast(dir > 0 ? '已是最后一页' : '已是第一页'); return; }
     location.assign(a.getAttribute('href'));
+  }
+
+  /* W 键：best-effort 关闭当前标签。Chrome 只放行"脚本弹出的标签"；
+   * 若真关掉了，页面随即销毁、下方定时器永不触发；若 250ms 后页面还活着 = 被拒，浮条明示。 */
+  function closeTab() {
+    window.close();
+    setTimeout(() => {
+      toast('浏览器拒绝关闭此标签（非脚本弹出）——请用 Ctrl+W / Alt+F4');
+    }, 250);
   }
 
   async function runHotkey(ctx, withBack) {
