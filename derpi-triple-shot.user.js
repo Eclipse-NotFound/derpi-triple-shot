@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      1.3.1
+// @version      1.3.2
 // @description  一键 收藏+点赞+下载（derpibooru）：F/D/E 快捷键 + 浮动按钮。收藏走站内原生（自带点赞、重复点无害），按站内原版文件名下载原图到 下载/derpi/。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -22,7 +22,7 @@
  * 键位：F = 三连（站内原生收藏+点赞，插件补下载；详情页完成后自动返回）
  *       D = 网格：进入悬停图详情页；详情：返回上一页
  *       E = 网格：翻到下一页
- *       C = 记忆当前网址并切到中性页面；站外任意页面按 C = 跳回记忆的网址（中性页面可经菜单设置）
+ *       C/X = 记忆当前网址并切到中性页面（并列键，菜单可选启用哪个或都开）；站外按 C/X = 跳回
  * 按钮：左键 = 三连（详情/网格统一）；详情页右键 = 返回；可拖动、位置记忆
  * 菜单：⏱ 设置自动返回延时（持久化）｜🎯 重置按钮位置
  * 下载：浏览器默认下载目录/derpi/，站内原版文件名（超长自动截断）
@@ -45,7 +45,7 @@
     hotkey:            'f',         // 三连键
     navHotkey:         'd',         // 导航键
     pageHotkey:        'e',         // 翻页键
-    leaveHotkey:       'c',         // 离开键（1.3.1 起 W→C）：站内=记忆当前网址并离开；站外=跳回记忆网址
+    leaveHotkeys:      ['c', 'x'],  // 离开键（1.3.2 起 C/X 并列；菜单「🎛」可选启用哪个或都开）
     leaveAction:       'neutral',   // 离开动作：'neutral' 切中性页面（定稿）| 'close' 尝试关标签（best-effort 备选）
     neutralUrl:        'https://www.bing.com', // 中性页面默认值（须 http(s) 站点；菜单「🌐」可改，存脚本存储）
     staggerMs:         300,         // 收藏先发车、下载晚 staggerMs 毫秒（错峰用）
@@ -62,14 +62,14 @@
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
-    const isC = key === CONFIG.leaveHotkey;
-    if (!isF && !isD && !isE && !isC) return;
+    const isLeave = leaveHotkeys().includes(key);
+    if (!isF && !isD && !isE && !isLeave) return;
     if (isTextTarget(e.target)) return;                    // 输入框/编辑器打字不触发
-    if (!ON_DERPI) {                                       // 站外：仅 C = 跳回记忆的网址
-      if (!isC) return;
+    if (!ON_DERPI) {                                       // 站外：仅离开键 = 跳回记忆的网址
+      if (!isLeave) return;
       const memo = (typeof GM_getValue === 'function') ? GM_getValue('lastDerpiUrl', null) : null;
       if (memo) location.assign(memo);
-      else toast('还没有记忆的网址——先在 derpibooru 站内按一次 C');
+      else toast('还没有记忆的网址——先在 derpibooru 站内按一次 ' + leaveHotkeys().map((k) => k.toUpperCase()).join('/'));
       return;
     }
     const kind = pageKind();
@@ -77,7 +77,7 @@
       const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
       if (c) setTargetFromEl(c);                            // 悬停追踪滞后时现场锁定
     }
-    if (isC) {                                             // C：记忆当前网址 + 离开（1.3.1：W→C）
+    if (isLeave) {                                         // 离开键（C/X 并列）：记忆当前网址 + 离开
       if (typeof GM_setValue === 'function') GM_setValue('lastDerpiUrl', location.href);
       leaveSite();
     } else if (isE) {                                      // E：网格翻下一页
@@ -475,6 +475,28 @@
     }, 250);
   }
 
+  /* 离开键集合（1.3.2：C/X 并列）：菜单「🎛」设置优先（存脚本存储），留空/非法回退配置区默认 */
+  function leaveHotkeys() {
+    const v = (typeof GM_getValue === 'function') ? GM_getValue('leaveHotkeys', null) : null;
+    if (Array.isArray(v)) {
+      const keys = v.map((k) => String(k).toLowerCase()).filter((k) => /^[a-z]$/.test(k));
+      if (keys.length) return [...new Set(keys)];
+    }
+    return CONFIG.leaveHotkeys;
+  }
+  function setLeaveKeysMenu() {
+    const cur = leaveHotkeys().map((k) => k.toUpperCase()).join('');
+    const v = window.prompt(
+      '离开键启用哪些？\n输入 c、x 或 cx（都启用）；留空恢复默认（C+X）。\n当前：' + cur,
+      cur);
+    if (v === null) return;                    // 取消
+    const t = v.toLowerCase().replace(/[^cx]/g, '');
+    if (t === '') { GM_setValue('leaveHotkeys', null); toast('离开键已恢复默认：C+X'); return; }
+    const keys = [...new Set(t.split(''))];
+    GM_setValue('leaveHotkeys', keys);
+    toast('离开键已启用：' + keys.map((k) => k.toUpperCase()).join('+'));
+  }
+
   /* 离开动作（1.3.1 定稿）：'neutral' 切中性页面（可靠，站外 C 仍可跳回）；
    * 'close' 尝试关标签（best-effort 备选，多数正常标签会被浏览器拒绝——"关闭整个浏览器"超出网页脚本能力）。 */
   function leaveAction() {
@@ -583,6 +605,7 @@
     if (typeof GM_registerMenuCommand === 'function') {
       GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
       GM_registerMenuCommand('🌐 设置中性页面（C 键离开目标）', setNeutralUrlMenu);
+      GM_registerMenuCommand('🎛 启用离开键（C/X/都开）', setLeaveKeysMenu);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     booted = true;   // 初始化完成后开放 document-start 早挂的键盘监听
