@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      1.1.0
+// @version      1.2.0
 // @description  一键 收藏+点赞+下载（derpibooru）：F/D/E 快捷键 + 浮动按钮。收藏走站内原生（自带点赞、重复点无害），按站内原版文件名下载原图到 下载/derpi/。
 // @author       you
 // @match        https://derpibooru.org/*
+// @match        *://*/*
 // @grant        GM_addStyle
 // @grant        GM_download
 // @grant        GM_getValue
@@ -20,7 +21,7 @@
  *
  * 键位：F = 三连（站内原生收藏+点赞，插件补下载；详情页完成后自动返回）
  *       D = 网格：进入悬停图详情页；详情：返回上一页
- *       E = 网格：翻到下一页
+ *       E = 网格翻页并记忆当前网址；在任何非 derpibooru 页面按 E = 跳回记忆的网址
  *       W = 尝试关闭当前标签（best-effort：浏览器仅放行脚本弹出的标签，被拒时浮条提示）
  * 按钮：左键 = 三连（详情/网格统一）；详情页右键 = 返回；可拖动、位置记忆
  * 菜单：⏱ 设置自动返回延时（持久化）｜🎯 重置按钮位置
@@ -48,7 +49,9 @@
     staggerMs:         300,         // 收藏先发车、下载晚 staggerMs 毫秒（错峰用）
   };
 
-  /* 键盘监听在 document-start 挂到 window 捕获期——先于站方快捷键处理器（站方会抢 F/E，见 git 历史 0.2.8） */
+  /* 键盘监听在 document-start 挂到 window 捕获期——先于站方快捷键处理器（站方会抢 F/E，见 git 历史 0.2.8）。
+   * 1.2.0：@match 扩到全站——非 derpibooru 页面仅 E 键生效（跳回记忆网址），其余键与 UI 仍限站内。 */
+  const ON_DERPI = location.hostname === 'derpibooru.org' || location.hostname.endsWith('.derpibooru.org');
   let booted = false;
   window.addEventListener('keydown', (e) => {
     if (!booted) return;
@@ -59,7 +62,14 @@
     const isE = key === CONFIG.pageHotkey;
     const isW = key === CONFIG.closeHotkey;
     if (!isF && !isD && !isE && !isW) return;
-    if (isTextTarget(e.target)) return;                    // 搜索框/编辑器打字不触发
+    if (isTextTarget(e.target)) return;                    // 输入框/编辑器打字不触发
+    if (!ON_DERPI) {                                       // 站外：仅 E = 跳回记忆的网址
+      if (!isE) return;
+      const memo = (typeof GM_getValue === 'function') ? GM_getValue('lastDerpiUrl', null) : null;
+      if (memo) location.assign(memo);
+      else toast('还没有记忆的网址——先在 derpibooru 站内按一次 E');
+      return;
+    }
     const kind = pageKind();
     if (kind === 'grid' && !state.targetId) {
       const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
@@ -67,8 +77,10 @@
     }
     if (isW) {
       closeTab();                                           // W：best-effort 关闭当前标签
-    } else if (isE) {
+    } else if (isE) {                                      // E：记忆当前网址 + 网格翻下一页
+      if (typeof GM_setValue === 'function') GM_setValue('lastDerpiUrl', location.href);
       if (kind === 'grid') gotoRelPage(+1);
+      else toast('已记忆当前网址');
     } else if (isF) {                                      // F：站内原生收藏/点赞 + 插件补下载
       if (kind === 'detail') runHotkey(detailContext(), true);
       else if (kind === 'grid' && state.targetId) runHotkey(gridContext(), false);
@@ -414,7 +426,7 @@
   }
 
   document.addEventListener('mouseover', (e) => {
-    if (pageKind() !== 'grid' || !e.target || !e.target.closest) return;
+    if (!ON_DERPI || pageKind() !== 'grid' || !e.target || !e.target.closest) return;
     setTargetFromEl(e.target.closest('div.image-container[data-image-id]'));
   });
 
@@ -534,6 +546,7 @@
   /* ---------------- 启动 ---------------- */
 
   function main() {
+    if (!ON_DERPI) { booted = true; return; }              // 站外页面：无按钮无菜单，仅 E 键待命
     if (typeof GM_getValue !== 'function' || typeof GM_download !== 'function') {
       console.warn('[DTS] GM 功能不可用——大概率是 Chrome 的「允许用户脚本」没开。');
     }
