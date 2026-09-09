@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Derpi Triple Shot — derpibooru 一键三连
 // @namespace    local.derpi.triple.shot
-// @version      1.3.0
+// @version      1.3.1
 // @description  一键 收藏+点赞+下载（derpibooru）：F/D/E 快捷键 + 浮动按钮。收藏走站内原生（自带点赞、重复点无害），按站内原版文件名下载原图到 下载/derpi/。
 // @author       you
 // @match        https://derpibooru.org/*
@@ -22,7 +22,7 @@
  * 键位：F = 三连（站内原生收藏+点赞，插件补下载；详情页完成后自动返回）
  *       D = 网格：进入悬停图详情页；详情：返回上一页
  *       E = 网格：翻到下一页
- *       W = 记忆当前网址并离开（动作可切：中性页面/尝试关标签）；站外任意页面按 W = 跳回记忆的网址
+ *       C = 记忆当前网址并切到中性页面；站外任意页面按 C = 跳回记忆的网址（中性页面可经菜单设置）
  * 按钮：左键 = 三连（详情/网格统一）；详情页右键 = 返回；可拖动、位置记忆
  * 菜单：⏱ 设置自动返回延时（持久化）｜🎯 重置按钮位置
  * 下载：浏览器默认下载目录/derpi/，站内原版文件名（超长自动截断）
@@ -45,9 +45,9 @@
     hotkey:            'f',         // 三连键
     navHotkey:         'd',         // 导航键
     pageHotkey:        'e',         // 翻页键
-    closeHotkey:       'w',         // 离开键：站内=记忆当前网址并离开；站外=跳回记忆网址
-    leaveAction:       'neutral',   // W 的离开动作：'neutral' 切中性页面 | 'close' 尝试关标签（评估期，菜单可切）
-    neutralUrl:        'https://www.bing.com', // 中性页面（须 https 站点：about:blank 不加载脚本，W 跳回会失效）
+    leaveHotkey:       'c',         // 离开键（1.3.1 起 W→C）：站内=记忆当前网址并离开；站外=跳回记忆网址
+    leaveAction:       'neutral',   // 离开动作：'neutral' 切中性页面（定稿）| 'close' 尝试关标签（best-effort 备选）
+    neutralUrl:        'https://www.bing.com', // 中性页面默认值（须 http(s) 站点；菜单「🌐」可改，存脚本存储）
     staggerMs:         300,         // 收藏先发车、下载晚 staggerMs 毫秒（错峰用）
   };
 
@@ -62,14 +62,14 @@
     const isF = key === CONFIG.hotkey;
     const isD = key === CONFIG.navHotkey;
     const isE = key === CONFIG.pageHotkey;
-    const isW = key === CONFIG.closeHotkey;
-    if (!isF && !isD && !isE && !isW) return;
+    const isC = key === CONFIG.leaveHotkey;
+    if (!isF && !isD && !isE && !isC) return;
     if (isTextTarget(e.target)) return;                    // 输入框/编辑器打字不触发
-    if (!ON_DERPI) {                                       // 站外：仅 W = 跳回记忆的网址
-      if (!isW) return;
+    if (!ON_DERPI) {                                       // 站外：仅 C = 跳回记忆的网址
+      if (!isC) return;
       const memo = (typeof GM_getValue === 'function') ? GM_getValue('lastDerpiUrl', null) : null;
       if (memo) location.assign(memo);
-      else toast('还没有记忆的网址——先在 derpibooru 站内按一次 W');
+      else toast('还没有记忆的网址——先在 derpibooru 站内按一次 C');
       return;
     }
     const kind = pageKind();
@@ -77,10 +77,10 @@
       const c = e.target.closest && e.target.closest('div.image-container[data-image-id]');
       if (c) setTargetFromEl(c);                            // 悬停追踪滞后时现场锁定
     }
-    if (isW) {                                             // W：记忆当前网址 + 按离开动作走（1.3.0）
+    if (isC) {                                             // C：记忆当前网址 + 离开（1.3.1：W→C）
       if (typeof GM_setValue === 'function') GM_setValue('lastDerpiUrl', location.href);
       leaveSite();
-    } else if (isE) {                                      // E：网格翻下一页（1.3.0 起不再记忆）
+    } else if (isE) {                                      // E：网格翻下一页
       if (kind === 'grid') gotoRelPage(+1);
     } else if (isF) {                                      // F：站内原生收藏/点赞 + 插件补下载
       if (kind === 'detail') runHotkey(detailContext(), true);
@@ -475,22 +475,31 @@
     }, 250);
   }
 
-  /* 1.3.0 W 的离开动作（评估期，菜单可切）：'neutral' 切中性页面（可靠，且站外 W 仍可跳回）/
-   * 'close' 尝试关标签（best-effort，多数正常标签会被浏览器拒绝——"关闭整个浏览器"超出网页脚本能力）。 */
+  /* 离开动作（1.3.1 定稿）：'neutral' 切中性页面（可靠，站外 C 仍可跳回）；
+   * 'close' 尝试关标签（best-effort 备选，多数正常标签会被浏览器拒绝——"关闭整个浏览器"超出网页脚本能力）。 */
   function leaveAction() {
     const v = (typeof GM_getValue === 'function') ? GM_getValue('leaveAction', null) : null;
     return (v === 'close' || v === 'neutral') ? v : CONFIG.leaveAction;
   }
-  function toggleLeaveAction() {
-    const next = leaveAction() === 'neutral' ? 'close' : 'neutral';
-    if (typeof GM_setValue === 'function') GM_setValue('leaveAction', next);
-    alert('W 的离开动作已切换为：' + (next === 'neutral'
-      ? '切到中性页面（' + CONFIG.neutralUrl + '，站外按 W 可跳回）'
-      : '尝试关闭标签（多数场合会被浏览器拒绝并浮条提示）'));
+  /* 中性页面：菜单「🌐」设置优先（存脚本存储），留空恢复配置区默认 */
+  function neutralUrl() {
+    const v = (typeof GM_getValue === 'function') ? GM_getValue('neutralUrl', null) : null;
+    return (typeof v === 'string' && /^https?:\/\//.test(v)) ? v : CONFIG.neutralUrl;
+  }
+  function setNeutralUrlMenu() {
+    const v = window.prompt(
+      '按 C 离开时切到的中性页面网址。\n须以 http:// 或 https:// 开头（about:blank 等空白页不加载脚本，C 跳回会失效）；留空恢复默认。',
+      neutralUrl());
+    if (v === null) return;                    // 取消
+    const t = v.trim();
+    if (t === '') { GM_setValue('neutralUrl', null); toast('中性页面已恢复默认：' + CONFIG.neutralUrl); return; }
+    if (!/^https?:\/\//.test(t)) { toast('网址须以 http:// 或 https:// 开头'); return; }
+    GM_setValue('neutralUrl', t);
+    toast('中性页面已设为 ' + t);
   }
   function leaveSite() {
     if (leaveAction() === 'close') { closeTab(); return; }
-    location.assign(CONFIG.neutralUrl);
+    location.assign(neutralUrl());
   }
 
   async function runHotkey(ctx, withBack) {
@@ -573,7 +582,7 @@
     setFace('idle');
     if (typeof GM_registerMenuCommand === 'function') {
       GM_registerMenuCommand('⏱ 设置自动返回延时', setBackDelayMenu);
-      GM_registerMenuCommand('🔀 切换 W 离开动作', toggleLeaveAction);
+      GM_registerMenuCommand('🌐 设置中性页面（C 键离开目标）', setNeutralUrlMenu);
       GM_registerMenuCommand('🎯 重置按钮位置', () => { GM_setValue('btnPos', null); restorePos(); toast('按钮位置已重置'); });
     }
     booted = true;   // 初始化完成后开放 document-start 早挂的键盘监听
